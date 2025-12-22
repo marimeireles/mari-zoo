@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from .auth import get_login_hint
 from .evaluators import EvalResult, evaluate_task
 from .models import Task, TaskResult
 from .zoo import Zoo
@@ -79,8 +80,9 @@ class TaskRunner:
             if task.require_reset:
                 self.zoo.reset_databases()
 
-            # Include start URL in the task - browser_use handles navigation
-            full_task = f"Go to {start_url} and then: {task.intent}"
+            # Build task with login hint if needed
+            login_hint = get_login_hint(task.sites) if task.require_login else ""
+            full_task = f"Go to {start_url}. {login_hint}{task.intent}"
 
             # Create agent for this task
             agent = Agent(
