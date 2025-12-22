@@ -22,7 +22,7 @@ URL_MAPPINGS = {
 class ZooConfig:
     """Configuration for Zoo connection."""
 
-    proxy_url: str = "http://localhost:3128"
+    proxy_url: str = "http://localhost:3129"
     instance: str | None = None
 
 

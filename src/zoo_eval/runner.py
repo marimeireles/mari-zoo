@@ -49,14 +49,14 @@ class TaskRunner:
     async def setup(self):
         """Initialize browser_use components."""
         # Lazy import to avoid loading at module level
-        from browser_use import Agent, Browser, BrowserConfig, ChatOpenAI
+        from browser_use import Agent, Browser, ChatOpenAI
+        from browser_use.browser.profile import ProxySettings
 
-        browser_config = BrowserConfig(
+        self._browser = Browser(
             headless=self.config.headless,
-            proxy={"server": self.zoo.config.proxy_url},
-            extra_chromium_args=["--ignore-certificate-errors"],
+            proxy=ProxySettings(server=self.zoo.config.proxy_url),
+            args=["--ignore-certificate-errors"],
         )
-        self._browser = Browser(config=browser_config)
 
         # Use OpenAI GPT-4o as the LLM
         self._llm = ChatOpenAI(model="gpt-4o")
@@ -64,7 +64,7 @@ class TaskRunner:
     async def teardown(self):
         """Clean up resources."""
         if self._browser:
-            await self._browser.close()
+            await self._browser.stop()
             self._browser = None
 
     async def run_task(self, task: Task) -> TaskResult:
@@ -79,31 +79,39 @@ class TaskRunner:
             if task.require_reset:
                 self.zoo.reset_databases()
 
+            # Include start URL in the task - browser_use handles navigation
+            full_task = f"Go to {start_url} and then: {task.intent}"
+
             # Create agent for this task
             agent = Agent(
-                task=task.intent,
+                task=full_task,
                 llm=self._llm,
                 browser=self._browser,
             )
 
-            # Navigate to start URL first
-            browser_context = await self._browser.new_context()
-            page = await browser_context.new_page()
-            await page.goto(start_url)
-
             # Run the agent
             result = await agent.run(max_steps=self.config.max_steps)
 
-            # Extract results
-            final_url = page.url if page else None
-            page_content = await page.content() if page else None
-
-            # Get the agent's answer from the result
+            # Extract results from agent
             agent_answer = None
-            if result and hasattr(result, 'final_result'):
-                agent_answer = result.final_result
+            final_url = None
+            page_content = None
 
-            await browser_context.close()
+            if result:
+                # Get the agent's final result (it's a method, not a property)
+                if hasattr(result, 'final_result'):
+                    fr = result.final_result()
+                    if fr:
+                        agent_answer = fr.extracted_content if hasattr(fr, 'extracted_content') else str(fr)
+
+                # Try to get current page info
+                try:
+                    final_url = await self._browser.get_current_page_url()
+                    page = await self._browser.get_current_page()
+                    if page:
+                        page_content = await page.content()
+                except Exception:
+                    pass
 
             return TaskResult(
                 task_id=task.task_id,
