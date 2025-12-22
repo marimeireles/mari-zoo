@@ -49,8 +49,7 @@ class TaskRunner:
     async def setup(self):
         """Initialize browser_use components."""
         # Lazy import to avoid loading at module level
-        from browser_use import Agent, Browser, BrowserConfig
-        from langchain_anthropic import ChatAnthropic
+        from browser_use import Agent, Browser, BrowserConfig, ChatOpenAI
 
         browser_config = BrowserConfig(
             headless=self.config.headless,
@@ -59,8 +58,8 @@ class TaskRunner:
         )
         self._browser = Browser(config=browser_config)
 
-        # Use Anthropic Claude as the LLM
-        self._llm = ChatAnthropic(model="claude-sonnet-4-20250514")
+        # Use OpenAI GPT-4o as the LLM
+        self._llm = ChatOpenAI(model="gpt-4o")
 
     async def teardown(self):
         """Clean up resources."""
