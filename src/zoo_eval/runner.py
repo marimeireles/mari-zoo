@@ -20,7 +20,7 @@ class RunConfig:
     max_steps: int = 50
     timeout_seconds: float = 300.0
     headless: bool = True
-    save_traces: bool = False
+    save_traces: bool = True
     trace_dir: str = "./traces"
 
 
@@ -93,6 +93,17 @@ class TaskRunner:
 
             # Run the agent
             result = await agent.run(max_steps=self.config.max_steps)
+
+            # Save trace if configured
+            if self.config.save_traces:
+                from pathlib import Path
+                trace_dir = Path(self.config.trace_dir)
+                trace_dir.mkdir(parents=True, exist_ok=True)
+                trace_path = trace_dir / f"task_{task.task_id}.json"
+                try:
+                    agent.save_history(trace_path)
+                except Exception as e:
+                    pass  # Don't fail the task if trace saving fails
 
             # Extract results from agent
             agent_answer = None
