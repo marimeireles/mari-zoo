@@ -158,5 +158,50 @@ def reset():
         raise typer.Exit(1)
 
 
+@app.command()
+def postgres(
+    query: str = typer.Argument(None, help="SQL query to execute"),
+    database: str = typer.Option("postgres", "-d", "--database", help="Database name"),
+    list_dbs: bool = typer.Option(False, "--list", "-l", help="List databases"),
+    tables: bool = typer.Option(False, "--tables", "-t", help="List tables"),
+):
+    """Query PostgreSQL database."""
+    zoo = Zoo()
+
+    if list_dbs:
+        console.print(zoo.list_postgres_databases())
+    elif tables:
+        console.print(zoo.list_postgres_tables(database))
+    elif query:
+        console.print(zoo.query_postgres(query, database))
+    else:
+        console.print("Provide a query or use --list / --tables")
+        raise typer.Exit(1)
+
+
+@app.command()
+def mysql(
+    query: str = typer.Argument(None, help="SQL query to execute"),
+    database: str = typer.Option("mysql", "-d", "--database", help="Database name"),
+    list_dbs: bool = typer.Option(False, "--list", "-l", help="List databases"),
+    tables: bool = typer.Option(False, "--tables", "-t", help="List tables"),
+):
+    """Query MySQL database."""
+    zoo = Zoo()
+
+    if list_dbs:
+        console.print(zoo.list_mysql_databases())
+    elif tables:
+        if database == "mysql":
+            console.print("Specify a database with -d to list tables")
+            raise typer.Exit(1)
+        console.print(zoo.list_mysql_tables(database))
+    elif query:
+        console.print(zoo.query_mysql(query, database))
+    else:
+        console.print("Provide a query or use --list / --tables")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()

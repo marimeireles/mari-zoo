@@ -8,16 +8,16 @@ import yaml
 
 # Sites that have Zoo equivalents
 SUPPORTED_SITES = {
-    "shopping",      # → onestopshop.zoo
+    "shopping",       # → onestopshop.zoo
     "shopping_admin", # → onestopshop.zoo/admin
-    "reddit",        # → postmill.zoo
-    "gitlab",        # → gitea.zoo
-    "wikipedia",     # → wiki.zoo
+    "reddit",         # → postmill.zoo
+    "wikipedia",      # → wiki.zoo
 }
 
-# Sites without Zoo support
+# Sites without Zoo support (will create new evals for these)
 UNSUPPORTED_SITES = {
-    "map",  # No OSM/map service in Zoo
+    "map",     # No OSM/map service in Zoo
+    "gitlab",  # Will add Zoo-native gitea.zoo evals
 }
 
 

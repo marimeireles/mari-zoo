@@ -70,15 +70,45 @@ class Zoo:
         result = self.run_cli("restart")
         return result.returncode == 0
 
-    def query_postgres(self, database: str, query: str) -> str:
-        """Run a query against a PostgreSQL database."""
+    def query_postgres(self, query: str, database: str = "postgres") -> str:
+        """Run a query against a PostgreSQL database.
+
+        Args:
+            query: SQL query to execute
+            database: Database name (default: postgres)
+        """
         result = self.run_cli("shell", "postgres", "-d", database, "-c", query)
+        if result.returncode != 0:
+            return f"Error: {result.stderr}"
         return result.stdout
 
-    def query_mysql(self, database: str, query: str) -> str:
-        """Run a query against a MySQL database."""
-        result = self.run_cli("shell", "mysql", database, "-e", query)
+    def query_mysql(self, query: str, database: str = "mysql") -> str:
+        """Run a query against a MySQL database.
+
+        Args:
+            query: SQL query to execute
+            database: Database name (default: mysql)
+        """
+        result = self.run_cli("shell", "mysql", "-D", database, "-e", query)
+        if result.returncode != 0:
+            return f"Error: {result.stderr}"
         return result.stdout
+
+    def list_postgres_databases(self) -> str:
+        """List all PostgreSQL databases."""
+        return self.query_postgres("\\l")
+
+    def list_postgres_tables(self, database: str = "postgres") -> str:
+        """List tables in a PostgreSQL database."""
+        return self.query_postgres("\\dt", database)
+
+    def list_mysql_databases(self) -> str:
+        """List all MySQL databases."""
+        return self.query_mysql("SHOW DATABASES;")
+
+    def list_mysql_tables(self, database: str) -> str:
+        """List tables in a MySQL database."""
+        return self.query_mysql("SHOW TABLES;", database)
 
     def fetch_page(self, url: str) -> str:
         """Fetch a page through the Zoo proxy."""
