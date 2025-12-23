@@ -48,3 +48,4 @@ traces/
 # Auth state (contains credentials)
 .auth/
 traces/
+*.db

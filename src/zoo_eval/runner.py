@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -17,8 +18,8 @@ from .zoo import Zoo
 class RunConfig:
     """Configuration for task runs."""
 
-    max_steps: int = 50
-    timeout_seconds: float = 300.0
+    max_steps: int = 30
+    timeout_seconds: float = 120.0  # 2 minutes default
     headless: bool = True
     save_traces: bool = True
     trace_dir: str = "./traces"
@@ -44,29 +45,31 @@ class TaskRunner:
     def __init__(self, zoo: Zoo, config: RunConfig | None = None):
         self.zoo = zoo
         self.config = config or RunConfig()
-        self._agent = None
-        self._browser = None
+        self._llm = None
 
     async def setup(self):
         """Initialize browser_use components."""
+        os.environ["ANONYMIZED_TELEMETRY"] = "false"
         # Lazy import to avoid loading at module level
-        from browser_use import Agent, Browser, ChatOpenAI
-        from browser_use.browser.profile import ProxySettings
+        from browser_use import ChatOpenAI
 
-        self._browser = Browser(
-            headless=self.config.headless,
-            proxy=ProxySettings(server=self.zoo.config.proxy_url),
-            args=["--ignore-certificate-errors"],
-        )
-
-        # Use OpenAI GPT-4o as the LLM
+        # Use OpenAI GPT-4o as the LLM (reusable across tasks)
         self._llm = ChatOpenAI(model="gpt-4o")
 
     async def teardown(self):
         """Clean up resources."""
-        if self._browser:
-            await self._browser.stop()
-            self._browser = None
+        pass  # Browser is now created/destroyed per task
+
+    async def _create_browser(self):
+        """Create a fresh browser instance for a task."""
+        from browser_use import Browser
+        from browser_use.browser.profile import ProxySettings
+
+        return Browser(
+            headless=self.config.headless,
+            proxy=ProxySettings(server=self.zoo.config.proxy_url),
+            args=["--ignore-certificate-errors"],
+        )
 
     async def run_task(self, task: Task) -> TaskResult:
         """Run a single task and return the result."""
@@ -74,11 +77,15 @@ class TaskRunner:
 
         start_time = time.time()
         start_url = self.zoo.resolve_url(task.start_url)
+        browser = None
 
         try:
             # Reset if required
             if task.require_reset:
                 self.zoo.reset_databases()
+
+            # Create fresh browser for this task
+            browser = await self._create_browser()
 
             # Build task with login hint if needed
             login_hint = get_login_hint(task.sites) if task.require_login else ""
@@ -88,11 +95,22 @@ class TaskRunner:
             agent = Agent(
                 task=full_task,
                 llm=self._llm,
-                browser=self._browser,
+                browser=browser,
             )
 
-            # Run the agent
-            result = await agent.run(max_steps=self.config.max_steps)
+            # Run the agent with timeout
+            try:
+                result = await asyncio.wait_for(
+                    agent.run(max_steps=self.config.max_steps),
+                    timeout=self.config.timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                return TaskResult(
+                    task_id=task.task_id,
+                    success=False,
+                    error=f"Timeout after {self.config.timeout_seconds}s",
+                    duration_seconds=time.time() - start_time,
+                )
 
             # Save trace if configured
             if self.config.save_traces:
@@ -119,8 +137,8 @@ class TaskRunner:
 
                 # Try to get current page info
                 try:
-                    final_url = await self._browser.get_current_page_url()
-                    page = await self._browser.get_current_page()
+                    final_url = await browser.get_current_page_url()
+                    page = await browser.get_current_page()
                     if page:
                         page_content = await page.content()
                 except Exception:
@@ -143,6 +161,14 @@ class TaskRunner:
                 error=str(e),
                 duration_seconds=time.time() - start_time,
             )
+
+        finally:
+            # Always clean up the browser
+            if browser:
+                try:
+                    await browser.stop()
+                except Exception:
+                    pass
 
     async def run_and_evaluate(self, task: Task) -> RunResult:
         """Run a task and evaluate the result."""

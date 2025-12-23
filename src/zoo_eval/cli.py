@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .models import load_tasks
+from .results import ResultsDB, print_report
 from .runner import RunConfig, TaskRunner
 from .zoo import Zoo, ZooConfig
 
@@ -63,8 +64,11 @@ def run(
     task_ids: str = typer.Option(None, "--tasks", "-t", help="Comma-separated task IDs"),
     limit: int = typer.Option(None, "--limit", "-n", help="Max tasks to run"),
     headless: bool = typer.Option(True, help="Run browser headlessly"),
-    max_steps: int = typer.Option(50, help="Max steps per task"),
-    output: Path = typer.Option(None, "--output", "-o", help="Output results to JSON"),
+    max_steps: int = typer.Option(30, help="Max steps per task"),
+    timeout: int = typer.Option(120, help="Timeout in seconds per task"),
+    resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
+    run_name: str = typer.Option(None, "--name", help="Name for this run"),
+    db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
 ):
     """Run evaluation tasks."""
     tasks = load_tasks(config)
@@ -81,69 +85,101 @@ def run(
         console.print("[red]No tasks to run[/red]")
         raise typer.Exit(1)
 
-    console.print(f"Running {len(tasks)} task(s)...")
-
     zoo = Zoo()
     if not zoo.is_running():
         console.print("[red]Zoo is not running. Start it with: npx the_zoo start[/red]")
         raise typer.Exit(1)
 
-    run_config = RunConfig(headless=headless, max_steps=max_steps)
+    # Set up results database
+    db = ResultsDB(db_path)
+
+    if resume:
+        run_id = db.get_latest_run(str(config))
+        if run_id:
+            completed = db.get_completed_task_ids(run_id)
+            original_count = len(tasks)
+            tasks = [t for t in tasks if t.task_id not in completed]
+            console.print(f"Resuming run #{run_id}: {len(completed)} already done, {len(tasks)} remaining")
+        else:
+            console.print("[yellow]No previous run found, starting fresh[/yellow]")
+            run_id = db.create_run(run_name, str(config))
+    else:
+        run_id = db.create_run(run_name, str(config))
+
+    if not tasks:
+        console.print("[green]All tasks already completed![/green]")
+        print_report(db, run_id)
+        db.close()
+        return
+
+    console.print(f"Run #{run_id}: Running {len(tasks)} task(s)...")
+
+    run_config = RunConfig(headless=headless, max_steps=max_steps, timeout_seconds=timeout)
     runner = TaskRunner(zoo, run_config)
 
     async def execute():
         await runner.setup()
         try:
-            return await runner.run_batch(tasks)
+            for task in tasks:
+                console.print(f"  Task {task.task_id}: {task.intent[:50]}...")
+                result = await runner.run_and_evaluate(task)
+
+                # Save immediately after each task
+                db.save_result(run_id, result)
+
+                status = "[green]PASS[/green]" if result.passed else "[red]FAIL[/red]"
+                console.print(f"    {status} ({result.task_result.duration_seconds:.1f}s)")
         finally:
             await runner.teardown()
 
-    results = asyncio.run(execute())
+    asyncio.run(execute())
 
-    # Display results
-    table = Table(title="Results")
-    table.add_column("Task ID", style="cyan")
-    table.add_column("Status", style="bold")
-    table.add_column("Eval", style="yellow")
-    table.add_column("Details", style="white", max_width=50)
+    # Finish run and show report
+    db.finish_run(run_id)
+    print_report(db, run_id)
+    db.close()
 
-    passed = 0
-    for r in results:
-        status = "[green]PASS[/green]" if r.passed else "[red]FAIL[/red]"
-        if r.passed:
-            passed += 1
 
-        eval_summary = ", ".join(
-            f"{'✓' if e.passed else '✗'} {e.eval_type.value}" for e in r.eval_results
-        )
-        details = r.eval_results[0].details if r.eval_results else r.task_result.error or ""
+@app.command()
+def report(
+    run_id: int = typer.Argument(None, help="Run ID to report on (default: latest)"),
+    db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
+    list_runs: bool = typer.Option(False, "--list", "-l", help="List all runs"),
+):
+    """Show evaluation report."""
+    db = ResultsDB(db_path)
 
-        table.add_row(str(r.task.task_id), status, eval_summary, details[:50])
+    if list_runs:
+        rows = db.conn.execute(
+            "SELECT id, name, config_path, started_at, status FROM runs ORDER BY id DESC LIMIT 20"
+        ).fetchall()
 
-    console.print(table)
-    console.print(f"\n[bold]Total: {passed}/{len(results)} passed[/bold]")
+        table = Table(title="Evaluation Runs")
+        table.add_column("ID", style="cyan")
+        table.add_column("Name")
+        table.add_column("Config")
+        table.add_column("Started")
+        table.add_column("Status")
 
-    # Save results if output specified
-    if output:
-        output_data = [
-            {
-                "task_id": r.task.task_id,
-                "passed": r.passed,
-                "success": r.task_result.success,
-                "agent_answer": r.task_result.agent_answer,
-                "final_url": r.task_result.final_url,
-                "error": r.task_result.error,
-                "steps": r.task_result.steps,
-                "duration": r.task_result.duration_seconds,
-                "evaluations": [
-                    {"type": e.eval_type.value, "passed": e.passed, "details": e.details}
-                    for e in r.eval_results
-                ],
-            }
-            for r in results
-        ]
-        output.write_text(json.dumps(output_data, indent=2))
-        console.print(f"Results saved to {output}")
+        for row in rows:
+            table.add_row(
+                str(row["id"]),
+                row["name"] or "-",
+                Path(row["config_path"]).name if row["config_path"] else "-",
+                row["started_at"][:19] if row["started_at"] else "-",
+                row["status"] or "-",
+            )
+        console.print(table)
+    else:
+        if run_id is None:
+            run_id = db.get_latest_run()
+        if run_id is None:
+            console.print("[red]No runs found[/red]")
+            raise typer.Exit(1)
+
+        print_report(db, run_id)
+
+    db.close()
 
 
 @app.command()
