@@ -66,7 +66,7 @@ def run(
     headless: bool = typer.Option(True, help="Run browser headlessly"),
     max_steps: int = typer.Option(30, help="Max steps per task"),
     timeout: int = typer.Option(120, help="Timeout in seconds per task"),
-    model: str = typer.Option("gpt-4o", "--model", "-m", help="Model: gpt-4o, flash, claude, or provider/model"),
+    model: str = typer.Option("google/gemini-2.5-flash", "--model", "-m", help="Model: flash, claude, gpt-4o, or provider/model"),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
     run_name: str = typer.Option(None, "--name", help="Name for this run"),
     db_path: Path = typer.Option("results.db", "--db", help="Results database path"),

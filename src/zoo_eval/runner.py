@@ -23,7 +23,7 @@ class RunConfig:
     headless: bool = True
     save_traces: bool = True
     trace_dir: str = "./traces"
-    model: str = "gpt-4o"  # Model to use (gpt-4o, flash, claude, etc.)
+    model: str = "google/gemini-2.5-flash"  # Model to use via OpenRouter
 
 
 @dataclass
@@ -61,7 +61,7 @@ class TaskRunner:
 
         # Model aliases for convenience
         aliases = {
-            "flash": "google/gemini-2.0-flash-001",
+            "flash": "google/gemini-2.5-flash",
             "claude": "anthropic/claude-sonnet-4",
             "sonnet": "anthropic/claude-sonnet-4",
         }

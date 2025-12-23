@@ -11,8 +11,9 @@ uv sync
 # Install playwright browsers
 uv run playwright install chromium
 
-# Set OpenAI API key
-export OPENAI_API_KEY=your-key
+# Set API key
+export OPENROUTER_API_KEY=your-key    # Required (default uses Gemini 2.5 Flash)
+export OPENAI_API_KEY=your-key        # Only needed for --model gpt-4o
 ```
 
 ## Running Evaluations
@@ -21,8 +22,17 @@ export OPENAI_API_KEY=your-key
 # Start The Zoo first
 npx the_zoo start
 
-# Run all tasks
+# Run with default model (gpt-4o)
 uv run zoo-eval run configs/tasks.yaml
+
+# Run with different models
+uv run zoo-eval run configs/tasks.yaml --model flash      # Gemini 2.0 Flash
+uv run zoo-eval run configs/tasks.yaml --model claude     # Claude Sonnet 4
+uv run zoo-eval run configs/tasks.yaml --model gpt-4o     # OpenAI GPT-4o
+
+# Use any OpenRouter model directly
+uv run zoo-eval run configs/tasks.yaml --model google/gemini-2.0-flash-001
+uv run zoo-eval run configs/tasks.yaml --model anthropic/claude-sonnet-4
 
 # Run specific tasks
 uv run zoo-eval run configs/tasks.yaml --tasks 21,22,23
