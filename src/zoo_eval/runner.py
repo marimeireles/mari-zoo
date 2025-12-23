@@ -23,6 +23,7 @@ class RunConfig:
     headless: bool = True
     save_traces: bool = True
     trace_dir: str = "./traces"
+    model: str = "gpt-4o"  # Model to use (gpt-4o, flash, claude, etc.)
 
 
 @dataclass
@@ -50,11 +51,31 @@ class TaskRunner:
     async def setup(self):
         """Initialize browser_use components."""
         os.environ["ANONYMIZED_TELEMETRY"] = "false"
-        # Lazy import to avoid loading at module level
+        self._llm = self._create_llm()
+
+    def _create_llm(self):
+        """Create LLM based on model config."""
         from browser_use import ChatOpenAI
 
-        # Use OpenAI GPT-4o as the LLM (reusable across tasks)
-        self._llm = ChatOpenAI(model="gpt-4o")
+        model = self.config.model
+
+        # Model aliases for convenience
+        aliases = {
+            "flash": "google/gemini-2.0-flash-001",
+            "claude": "anthropic/claude-sonnet-4",
+            "sonnet": "anthropic/claude-sonnet-4",
+        }
+        model = aliases.get(model, model)
+
+        # Use OpenRouter for non-OpenAI models
+        if "/" in model:
+            return ChatOpenAI(
+                model=model,
+                base_url="https://openrouter.ai/api/v1",
+                api_key=os.environ.get("OPENROUTER_API_KEY"),
+            )
+        else:
+            return ChatOpenAI(model=model)
 
     async def teardown(self):
         """Clean up resources."""

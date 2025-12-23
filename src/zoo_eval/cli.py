@@ -66,6 +66,7 @@ def run(
     headless: bool = typer.Option(True, help="Run browser headlessly"),
     max_steps: int = typer.Option(30, help="Max steps per task"),
     timeout: int = typer.Option(120, help="Timeout in seconds per task"),
+    model: str = typer.Option("gpt-4o", "--model", "-m", help="Model: gpt-4o, flash, claude, or provider/model"),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
     run_name: str = typer.Option(None, "--name", help="Name for this run"),
     db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
@@ -112,9 +113,9 @@ def run(
         db.close()
         return
 
-    console.print(f"Run #{run_id}: Running {len(tasks)} task(s)...")
+    console.print(f"Run #{run_id}: Running {len(tasks)} task(s) with model={model}...")
 
-    run_config = RunConfig(headless=headless, max_steps=max_steps, timeout_seconds=timeout)
+    run_config = RunConfig(headless=headless, max_steps=max_steps, timeout_seconds=timeout, model=model)
     runner = TaskRunner(zoo, run_config)
 
     async def execute():
