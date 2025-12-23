@@ -40,3 +40,23 @@ issues:
       The review is entirely positive about the headphones themselves.
     fix_applied: Changed eval from string_match to db_match with SQL query
     discovered: 2025-12-22
+
+  - id: 2
+    task_id: 21
+    dataset: webarena
+    category: data_quality
+    severity: low
+    description: |
+      Duplicate reviewer name "Michelle DavisMichelle Davis" in database.
+      Appears to be a data entry/scraping error where the name was concatenated.
+    affected_table: review_detail
+    affected_column: nickname
+    raw_value: "Michelle DavisMichelle Davis"
+    correct_value: "Michelle Davis"
+    analysis: |
+      The nickname field contains "Michelle DavisMichelle Davis" which is clearly
+      a duplicate concatenation. This causes the same review to appear twice in
+      query results - once under "Michelle Davis" and once under the malformed name.
+      This is a source data quality issue from the original WebArena dataset.
+    fix_applied: None - query returns both, agent should match "Michelle Davis"
+    discovered: 2025-12-22

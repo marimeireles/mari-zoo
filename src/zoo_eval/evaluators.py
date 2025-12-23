@@ -60,17 +60,21 @@ class StringMatchEvaluator(Evaluator):
 
         # Must include all
         if ref.must_include:
+            matched = [s for s in ref.must_include if s.lower() in answer]
             missing = [s for s in ref.must_include if s.lower() not in answer]
+            total = len(ref.must_include)
+            found = len(matched)
+
             if not missing:
                 return EvalResult(
                     passed=True,
                     eval_type=EvalType.STRING_MATCH,
-                    details=f"Includes all required: {ref.must_include}",
+                    details=f"Includes all {total} required values",
                 )
             return EvalResult(
                 passed=False,
                 eval_type=EvalType.STRING_MATCH,
-                details=f"Missing: {missing}",
+                details=f"Partial: {found}/{total} ({100*found//total}%). Found: {matched}. Missing: {missing}",
             )
 
         # Fuzzy match - all must be present (normalized)
@@ -221,17 +225,21 @@ class DBMatchEvaluator(Evaluator):
         answer = result.agent_answer.lower()
 
         if db_query.match_type == "must_include":
+            matched = [v for v in expected_values if v.lower() in answer]
             missing = [v for v in expected_values if v.lower() not in answer]
+            total = len(expected_values)
+            found = len(matched)
+
             if not missing:
                 return EvalResult(
                     passed=True,
                     eval_type=EvalType.DB_MATCH,
-                    details=f"Includes all {len(expected_values)} expected values",
+                    details=f"Includes all {total} expected values",
                 )
             return EvalResult(
                 passed=False,
                 eval_type=EvalType.DB_MATCH,
-                details=f"Missing: {missing}. Query: {db_query.query.strip()[:100]}",
+                details=f"Partial: {found}/{total} ({100*found//total}%). Found: {matched}. Missing: {missing}",
             )
 
         elif db_query.match_type == "exact_match":

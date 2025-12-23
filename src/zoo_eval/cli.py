@@ -23,13 +23,16 @@ console = Console()
 
 
 @app.command()
-def status():
+def status(
+    proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
+):
     """Check if Zoo is running and accessible."""
-    zoo = Zoo()
+    zoo_config = ZooConfig(proxy_url=f"http://localhost:{proxy_port}")
+    zoo = Zoo(zoo_config)
     if zoo.is_running():
-        console.print("[green]Zoo is running[/green]")
+        console.print(f"[green]Zoo is running on port {proxy_port}[/green]")
     else:
-        console.print("[red]Zoo is not accessible[/red]")
+        console.print(f"[red]Zoo is not accessible on port {proxy_port}[/red]")
         raise typer.Exit(1)
 
 
@@ -66,10 +69,11 @@ def run(
     headless: bool = typer.Option(True, help="Run browser headlessly"),
     max_steps: int = typer.Option(30, help="Max steps per task"),
     timeout: int = typer.Option(120, help="Timeout in seconds per task"),
-    model: str = typer.Option("google/gemini-2.5-flash", "--model", "-m", help="Model: flash, claude, gpt-4o, or provider/model"),
+    model: str = typer.Option("google/gemini-2.5-flash-lite", "--model", "-m", help="Model: flash, flash-lite, claude, gpt-4o, or provider/model"),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
     run_name: str = typer.Option(None, "--name", help="Name for this run"),
     db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
+    proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
 ):
     """Run evaluation tasks."""
     tasks = load_tasks(config)
@@ -86,7 +90,8 @@ def run(
         console.print("[red]No tasks to run[/red]")
         raise typer.Exit(1)
 
-    zoo = Zoo()
+    zoo_config = ZooConfig(proxy_url=f"http://localhost:{proxy_port}")
+    zoo = Zoo(zoo_config)
     if not zoo.is_running():
         console.print("[red]Zoo is not running. Start it with: npx the_zoo start[/red]")
         raise typer.Exit(1)

@@ -22,7 +22,7 @@ URL_MAPPINGS = {
 class ZooConfig:
     """Configuration for Zoo connection."""
 
-    proxy_url: str = "http://localhost:3129"
+    proxy_url: str = "http://localhost:3128"
     instance: str | None = None
 
 
@@ -67,6 +67,11 @@ class Zoo:
 
     def reset_databases(self) -> bool:
         """Reset all databases to initial state."""
+        result = self.run_cli("restart")
+        return result.returncode == 0
+
+    def restart(self) -> bool:
+        """Restart Zoo environment (fast, ~2-3 seconds)."""
         result = self.run_cli("restart")
         return result.returncode == 0
 

@@ -200,11 +200,18 @@ def print_report(db: ResultsDB, run_id: int):
     failed = db.get_failed_tasks(run_id)
     if failed:
         console.print(f"\n[bold red]Failed Tasks ({len(failed)}):[/bold red]")
-        table = Table()
-        table.add_column("Task ID", style="cyan")
-        table.add_column("Error/Reason", style="red", max_width=60)
 
         for row in failed[:10]:  # Show first 10
+            console.print(f"\n  [cyan]Task {row['task_id']}:[/cyan]")
+
+            # Show agent answer
+            if row["agent_answer"]:
+                answer = row["agent_answer"][:200]
+                if len(row["agent_answer"]) > 200:
+                    answer += "..."
+                console.print(f"    [dim]Agent answered:[/dim] {answer}")
+
+            # Show error or eval failure reason
             reason = row["error"] or ""
             if not reason and row["eval_results"]:
                 evals = json.loads(row["eval_results"])
@@ -212,8 +219,7 @@ def print_report(db: ResultsDB, run_id: int):
                     if not e["passed"]:
                         reason = e["details"]
                         break
-            table.add_row(str(row["task_id"]), reason[:60])
+            console.print(f"    [red]Reason:[/red] {reason[:100]}")
 
-        console.print(table)
         if len(failed) > 10:
-            console.print(f"  ... and {len(failed) - 10} more")
+            console.print(f"\n  ... and {len(failed) - 10} more")

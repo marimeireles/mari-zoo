@@ -23,7 +23,7 @@ class RunConfig:
     headless: bool = True
     save_traces: bool = True
     trace_dir: str = "./traces"
-    model: str = "google/gemini-2.5-flash"  # Model to use via OpenRouter
+    model: str = "google/gemini-2.5-flash-lite"  # Model to use via OpenRouter
 
 
 @dataclass
@@ -62,6 +62,7 @@ class TaskRunner:
         # Model aliases for convenience
         aliases = {
             "flash": "google/gemini-2.5-flash",
+            "flash-lite": "google/gemini-2.5-flash-lite",
             "claude": "anthropic/claude-sonnet-4",
             "sonnet": "anthropic/claude-sonnet-4",
         }
@@ -95,6 +96,14 @@ class TaskRunner:
     async def run_task(self, task: Task) -> TaskResult:
         """Run a single task and return the result."""
         from browser_use import Agent
+
+        # Restart Zoo between tasks for clean state
+        self.zoo.restart()
+        # Wait for Zoo to be ready
+        for _ in range(10):
+            if self.zoo.is_running():
+                break
+            time.sleep(1)
 
         start_time = time.time()
         start_url = self.zoo.resolve_url(task.start_url)
