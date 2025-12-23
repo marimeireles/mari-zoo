@@ -167,12 +167,114 @@ class ProgramHTMLEvaluator(Evaluator):
         )
 
 
+class DBMatchEvaluator(Evaluator):
+    """Evaluates agent answer against database query results."""
+
+    def evaluate(self, result: TaskResult, evaluation: Evaluation) -> EvalResult:
+        from .zoo import Zoo
+
+        if not result.agent_answer:
+            return EvalResult(
+                passed=False,
+                eval_type=EvalType.DB_MATCH,
+                details="No agent answer provided",
+            )
+
+        db_query = evaluation.db_query
+        if not db_query:
+            return EvalResult(
+                passed=False,
+                eval_type=EvalType.DB_MATCH,
+                details="No db_query defined",
+            )
+
+        # Run the query
+        zoo = Zoo()
+        try:
+            if db_query.db_type == "mysql":
+                query_result = zoo.query_mysql(db_query.query, db_query.database)
+            else:
+                query_result = zoo.query_postgres(db_query.query, db_query.database)
+        except Exception as e:
+            return EvalResult(
+                passed=False,
+                eval_type=EvalType.DB_MATCH,
+                details=f"Query error: {e}",
+            )
+
+        # Parse query results (tab-separated, first row is header)
+        lines = query_result.strip().split("\n")
+        if len(lines) < 2:
+            return EvalResult(
+                passed=False,
+                eval_type=EvalType.DB_MATCH,
+                details=f"Query returned no results. Query: {db_query.query}",
+            )
+
+        # Extract values from first column (skip header)
+        expected_values = []
+        for line in lines[1:]:
+            cols = line.split("\t")
+            if cols:
+                expected_values.append(cols[0].strip())
+
+        answer = result.agent_answer.lower()
+
+        if db_query.match_type == "must_include":
+            missing = [v for v in expected_values if v.lower() not in answer]
+            if not missing:
+                return EvalResult(
+                    passed=True,
+                    eval_type=EvalType.DB_MATCH,
+                    details=f"Includes all {len(expected_values)} expected values",
+                )
+            return EvalResult(
+                passed=False,
+                eval_type=EvalType.DB_MATCH,
+                details=f"Missing: {missing}. Query: {db_query.query.strip()[:100]}",
+            )
+
+        elif db_query.match_type == "exact_match":
+            if len(expected_values) == 1 and expected_values[0].lower() in answer:
+                return EvalResult(
+                    passed=True,
+                    eval_type=EvalType.DB_MATCH,
+                    details=f"Exact match: {expected_values[0]}",
+                )
+            return EvalResult(
+                passed=False,
+                eval_type=EvalType.DB_MATCH,
+                details=f"Expected '{expected_values[0]}', not found in answer",
+            )
+
+        elif db_query.match_type == "count":
+            # For count queries, check if the number appears in answer
+            if expected_values and expected_values[0] in answer:
+                return EvalResult(
+                    passed=True,
+                    eval_type=EvalType.DB_MATCH,
+                    details=f"Count match: {expected_values[0]}",
+                )
+            return EvalResult(
+                passed=False,
+                eval_type=EvalType.DB_MATCH,
+                details=f"Expected count '{expected_values[0]}', not in answer",
+            )
+
+        return EvalResult(
+            passed=False,
+            eval_type=EvalType.DB_MATCH,
+            details=f"Unknown match_type: {db_query.match_type}",
+        )
+
+
 def get_evaluator(eval_type: EvalType) -> Evaluator:
     """Get the appropriate evaluator for an eval type."""
     evaluators = {
         EvalType.STRING_MATCH: StringMatchEvaluator(),
         EvalType.URL_MATCH: URLMatchEvaluator(),
         EvalType.PROGRAM_HTML: ProgramHTMLEvaluator(),
+        EvalType.DB_MATCH: DBMatchEvaluator(),
     }
     return evaluators[eval_type]
 

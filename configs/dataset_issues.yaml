@@ -1,0 +1,42 @@
+# Dataset Issues Log
+# Tracking errors found in the original WebArena/VisualWebArena datasets
+# for potential paper/publication
+
+issues:
+  - id: 1
+    task_id: 21
+    dataset: webarena
+    category: incorrect_ground_truth
+    severity: high
+    original_expected:
+      - Joseph Brzezinski
+      - Catso
+      - Dibbins
+      - Anglebert Dinkherhump
+      - Michelle Davis
+    correct_expected:
+      - Catso
+      - Dibbins
+      - Anglebert Dinkherhump
+      - Michelle Davis
+    incorrect_value: Joseph Brzezinski
+    task_intent: "List out reviewers, if exist, who mention about ear cups being small"
+    description: |
+      Joseph Brzezinski incorrectly included in expected answer.
+      His review does not mention ear cups or headphone size at all.
+    raw_review: |
+      This headphone is wonderful.  I have tried several earbuds, headbands
+      with speaker inserts, and over ear with disappointing sound quality and
+      volume control or difficulty using.  Not so with this product.  The sound
+      quality is fantastic and I have no problem controlling and adjusting volume!
+      I am able to connect easily with a windows laptop, chrome book laptop, IPAD,
+      and several different android tablets.The written instructions come in a
+      number of different languages, type fits are a bit small for my tired ancient
+      eyes, but fortunately, operation is extremely simple.
+    analysis: |
+      The phrase "type fits are a bit small for my tired ancient eyes" refers to
+      the font/typeface size in the printed instruction manual, not the ear cups.
+      Likely "type fits" is a typo/OCR error for "typeface" or just "type".
+      The review is entirely positive about the headphones themselves.
+    fix_applied: Changed eval from string_match to db_match with SQL query
+    discovered: 2025-12-22

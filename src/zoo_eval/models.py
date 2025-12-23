@@ -15,6 +15,7 @@ class EvalType(str, Enum):
     STRING_MATCH = "string_match"
     URL_MATCH = "url_match"
     PROGRAM_HTML = "program_html"
+    DB_MATCH = "db_match"
 
 
 @dataclass
@@ -54,6 +55,27 @@ class HTMLCheck:
 
 
 @dataclass
+class DBQuery:
+    """Database query for dynamic evaluation."""
+
+    database: str
+    query: str
+    db_type: str = "mysql"  # mysql or postgres
+    match_type: str = "must_include"  # must_include, exact_match, or count
+
+    @classmethod
+    def from_dict(cls, data: dict | None) -> DBQuery | None:
+        if not data:
+            return None
+        return cls(
+            database=data.get("database", ""),
+            query=data.get("query", ""),
+            db_type=data.get("type", "mysql"),
+            match_type=data.get("match_type", "must_include"),
+        )
+
+
+@dataclass
 class Evaluation:
     """Evaluation criteria for a task."""
 
@@ -61,6 +83,7 @@ class Evaluation:
     reference_answers: ReferenceAnswers | None = None
     reference_url: str | None = None
     program_html: list[HTMLCheck] = field(default_factory=list)
+    db_query: DBQuery | None = None
 
     @classmethod
     def from_dict(cls, data: dict) -> Evaluation:
@@ -75,6 +98,7 @@ class Evaluation:
             reference_answers=ReferenceAnswers.from_dict(data.get(answers_key)),
             reference_url=data.get(url_key) or None,
             program_html=[HTMLCheck.from_dict(h) for h in data.get(html_key, []) or []],
+            db_query=DBQuery.from_dict(data.get("db_query")),
         )
 
 

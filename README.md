@@ -22,16 +22,14 @@ export OPENAI_API_KEY=your-key        # Only needed for --model gpt-4o
 # Start The Zoo first
 npx the_zoo start
 
-# Run with default model (gpt-4o)
+# Run with default model (Gemini 2.5 Flash)
 uv run zoo-eval run configs/tasks.yaml
 
 # Run with different models
-uv run zoo-eval run configs/tasks.yaml --model flash      # Gemini 2.0 Flash
 uv run zoo-eval run configs/tasks.yaml --model claude     # Claude Sonnet 4
 uv run zoo-eval run configs/tasks.yaml --model gpt-4o     # OpenAI GPT-4o
 
 # Use any OpenRouter model directly
-uv run zoo-eval run configs/tasks.yaml --model google/gemini-2.0-flash-001
 uv run zoo-eval run configs/tasks.yaml --model anthropic/claude-sonnet-4
 
 # Run specific tasks
@@ -69,4 +67,32 @@ uv run zoo-eval reset
 # Query databases directly
 uv run zoo-eval postgres "SELECT * FROM users LIMIT 5" -d shopping
 uv run zoo-eval mysql --list
+
+# Audit db_match tasks (verify queries return correct expected values)
+uv run python scripts/audit_db_evals.py configs/tasks.yaml
+uv run python scripts/audit_db_evals.py configs/tasks.yaml --tasks 21
 ```
+
+## Dynamic Database Evaluation
+
+Use `db_match` eval type to dynamically query the database for expected values instead of hardcoding:
+
+```yaml
+- id: 21
+  intent: List reviewers who mention ear cups being small
+  eval:
+    types:
+      - db_match
+    db_query:
+      database: onestopshop_db
+      type: mysql
+      match_type: must_include
+      query: |
+        SELECT DISTINCT rd.nickname
+        FROM review r
+        JOIN review_detail rd ON r.review_id = rd.review_id
+        WHERE r.entity_pk_value = 76525
+        AND rd.detail LIKE '%small ear%'
+```
+
+This makes evaluations self-documenting and catches dataset bugs.

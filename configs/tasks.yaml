@@ -167,14 +167,18 @@ tasks:
   require_reset: false
   eval:
     types:
-    - string_match
-    answers:
-      must_include:
-      - Joseph Brzezinski
-      - Catso
-      - Dibbins
-      - Anglebert Dinkherhump
-      - Michelle Davis
+    - db_match
+    db_query:
+      database: onestopshop_db
+      type: mysql
+      match_type: must_include
+      query: |
+        SELECT DISTINCT rd.nickname
+        FROM review r
+        JOIN review_detail rd ON r.review_id = rd.review_id
+        WHERE r.entity_pk_value = 76525
+        AND (rd.detail LIKE '%small ear%' OR rd.detail LIKE '%ear cup%'
+             OR rd.detail LIKE '%too small%' OR rd.detail LIKE '%very small ear%')
 - id: 22
   sites:
   - shopping
