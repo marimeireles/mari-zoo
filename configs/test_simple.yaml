@@ -1,0 +1,14 @@
+tasks:
+- id: 9999
+  sites:
+  - auth
+  intent: Navigate to the auth service at https://auth.zoo and tell me what the main heading says
+  start_url: https://home.zoo
+  require_login: false
+  require_reset: false
+  eval:
+    types:
+    - string_match
+    answers:
+      must_include:
+      - Zoo
