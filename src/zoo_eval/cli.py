@@ -10,9 +10,9 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .models import load_tasks
+from .models import RunConfig, load_tasks
 from .results import ResultsDB, print_report
-from .runner import RunConfig, TaskRunner
+from .runner import TaskRunner
 from .zoo import Zoo, ZooConfig
 
 app = typer.Typer(
@@ -70,6 +70,7 @@ def run(
     max_steps: int = typer.Option(30, help="Max steps per task"),
     timeout: int = typer.Option(120, help="Timeout in seconds per task"),
     model: str = typer.Option("google/gemini-2.5-flash-lite", "--model", "-m", help="Model: flash, flash-lite, claude, gpt-4o, or provider/model"),
+    shared_browser: bool = typer.Option(False, "--shared-browser", help="All agents share same browser and memory"),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
     run_name: str = typer.Option(None, "--name", help="Name for this run"),
     db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
@@ -120,7 +121,13 @@ def run(
 
     console.print(f"Run #{run_id}: Running {len(tasks)} task(s) with model={model}...")
 
-    run_config = RunConfig(headless=headless, max_steps=max_steps, timeout_seconds=timeout, model=model)
+    run_config = RunConfig(
+        headless=headless,
+        max_steps=max_steps,
+        timeout_seconds=timeout,
+        model=model,
+        shared_browser=shared_browser,
+    )
     runner = TaskRunner(zoo, run_config)
 
     async def execute():

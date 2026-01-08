@@ -2,8 +2,17 @@ tasks:
 - id: 9999
   sites:
   - auth
-  intent: Navigate to the auth service at https://auth.zoo and tell me what the main heading says
+  intent: Two agents navigate the Zoo environment
   start_url: https://home.zoo
+  agents:
+    - role: explorer
+      name: Alice
+      persona: A curious explorer who investigates the auth service
+      initial_task: Navigate to https://auth.zoo and read the main heading
+    - role: verifier
+      name: Bob
+      persona: A careful verifier who checks the homepage
+      initial_task: Stay on the homepage and identify what services are available
   require_login: false
   require_reset: false
   eval:

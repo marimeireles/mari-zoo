@@ -11,6 +11,19 @@ from typing import Any
 import yaml
 
 
+@dataclass
+class RunConfig:
+    """Configuration for task runs."""
+
+    max_steps: int = 30
+    timeout_seconds: float = 120.0  # 2 minutes default
+    headless: bool = True
+    save_traces: bool = True
+    trace_dir: str = "./traces"
+    model: str = "google/gemini-2.5-flash-lite"  # Model to use via OpenRouter
+    shared_browser: bool = False  # If True, all agents share the same browser and memory
+
+
 class EvalType(str, Enum):
     STRING_MATCH = "string_match"
     URL_MATCH = "url_match"
@@ -103,6 +116,25 @@ class Evaluation:
 
 
 @dataclass
+class AgentConfig:
+    """Configuration for a single agent in a multi-agent task."""
+
+    role: str
+    name: str
+    persona: str
+    initial_task: str
+
+    @classmethod
+    def from_dict(cls, data: dict) -> AgentConfig:
+        return cls(
+            role=data["role"],
+            name=data["name"],
+            persona=data["persona"],
+            initial_task=data["initial_task"],
+        )
+
+
+@dataclass
 class Task:
     """A single evaluation task."""
 
@@ -110,6 +142,7 @@ class Task:
     sites: list[str]
     intent: str
     start_url: str
+    agents: list[AgentConfig] = field(default_factory=list)
     require_login: bool = False
     require_reset: bool = False
     storage_state: str | None = None
@@ -120,11 +153,17 @@ class Task:
     def from_dict(cls, data: dict) -> Task:
         # Support both old format (task_id) and new format (id)
         task_id = data.get("id") if "id" in data else data.get("task_id")
+
+        # Parse agents list
+        agents_data = data.get("agents", [])
+        agents = [AgentConfig.from_dict(a) for a in agents_data]
+
         return cls(
             task_id=task_id,
             sites=data.get("sites", []),
             intent=data["intent"],
             start_url=data.get("start_url", ""),
+            agents=agents,
             require_login=data.get("require_login", False),
             require_reset=data.get("require_reset", False),
             storage_state=data.get("storage_state"),
@@ -134,12 +173,28 @@ class Task:
 
 
 @dataclass
+class AgentResult:
+    """Result from a single agent's execution."""
+
+    agent_name: str
+    agent_role: str
+    success: bool
+    answer: str | None = None
+    final_url: str | None = None
+    page_content: str | None = None
+    error: str | None = None
+    steps: int = 0
+    duration_seconds: float = 0.0
+
+
+@dataclass
 class TaskResult:
     """Result from running a task."""
 
     task_id: int
     success: bool
-    agent_answer: str | None = None
+    agent_results: list[AgentResult] = field(default_factory=list)
+    agent_answer: str | None = None  # Combined answer from all agents
     final_url: str | None = None
     page_content: str | None = None
     error: str | None = None
