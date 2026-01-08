@@ -117,12 +117,12 @@ class Evaluation:
 
 @dataclass
 class AgentConfig:
-    """Configuration for a single agent in a multi-agent task."""
+    """Configuration for agents in a universe."""
 
     role: str
     name: str
     persona: str
-    initial_task: str
+    goal: str  # Individual agent's goal
 
     @classmethod
     def from_dict(cls, data: dict) -> AgentConfig:
@@ -130,7 +130,27 @@ class AgentConfig:
             role=data["role"],
             name=data["name"],
             persona=data["persona"],
-            initial_task=data["initial_task"],
+            goal=data["goal"],
+        )
+
+
+@dataclass
+class Universe:
+    """A universe configuration defining active sites and agents."""
+
+    name: str
+    sites: list[str]  # List of active site names
+    agents: list[AgentConfig]
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Universe:
+        agents_data = data.get("agents", [])
+        agents = [AgentConfig.from_dict(a) for a in agents_data]
+
+        return cls(
+            name=data["name"],
+            sites=data.get("sites", []),
+            agents=agents,
         )
 
 
@@ -142,7 +162,7 @@ class Task:
     sites: list[str]
     intent: str
     start_url: str
-    agents: list[AgentConfig] = field(default_factory=list)
+    compatible_universes: list[str] = field(default_factory=list)
     require_login: bool = False
     require_reset: bool = False
     storage_state: str | None = None
@@ -154,16 +174,12 @@ class Task:
         # Support both old format (task_id) and new format (id)
         task_id = data.get("id") if "id" in data else data.get("task_id")
 
-        # Parse agents list
-        agents_data = data.get("agents", [])
-        agents = [AgentConfig.from_dict(a) for a in agents_data]
-
         return cls(
             task_id=task_id,
             sites=data.get("sites", []),
             intent=data["intent"],
             start_url=data.get("start_url", ""),
-            agents=agents,
+            compatible_universes=data.get("compatible_universes", []),
             require_login=data.get("require_login", False),
             require_reset=data.get("require_reset", False),
             storage_state=data.get("storage_state"),
@@ -217,3 +233,14 @@ def load_tasks(path: Path, limit: int | None = None) -> list[Task]:
     if limit:
         tasks = tasks[:limit]
     return tasks
+
+
+def load_universe(path: Path) -> Universe:
+    """Load a universe from a YAML file."""
+    with open(path) as f:
+        if path.suffix in (".yaml", ".yml"):
+            data = yaml.safe_load(f)
+        else:
+            data = json.load(f)
+
+    return Universe.from_dict(data)

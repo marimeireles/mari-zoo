@@ -16,30 +16,35 @@ export OPENROUTER_API_KEY=your-key    # Required (default uses Gemini 2.5 Flash)
 export OPENAI_API_KEY=your-key        # Only needed for --model gpt-4o
 ```
 
-## Running Evaluations
+## Multi-Agent Evaluation
+
+Zoo-eval supports multi-agent evaluation through **Universes**. See [docs/multi-agent.md](docs/multi-agent.md) for details.
 
 ```bash
 # Start The Zoo first
 npx the_zoo start
 
-# Run with default model (Gemini 2.5 Flash)
-uv run zoo-eval run configs/tasks.yaml
+# Run tasks with a universe (required)
+uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model gpt-4o
+
+# Watch in browser (non-headless)
+uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model gpt-4o --no-headless
 
 # Run with different models
-uv run zoo-eval run configs/tasks.yaml --model claude     # Claude Sonnet 4
-uv run zoo-eval run configs/tasks.yaml --model gpt-4o     # OpenAI GPT-4o
+uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model claude
+uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model flash
 
-# Use any OpenRouter model directly
-uv run zoo-eval run configs/tasks.yaml --model anthropic/claude-sonnet-4
+# Shared browser mode (agents run sequentially with shared context)
+uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model gpt-4o --shared-browser
 
 # Run specific tasks
-uv run zoo-eval run configs/tasks.yaml --tasks 21,22,23
+uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model gpt-4o --tasks 1,2,3
 
 # Run with options
-uv run zoo-eval run configs/tasks.yaml --limit 10 --timeout 180 --max-steps 30
+uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model gpt-4o --limit 10 --timeout 180
 
 # Resume an interrupted run
-uv run zoo-eval run configs/tasks.yaml --resume
+uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model gpt-4o --resume
 ```
 
 ## Reports

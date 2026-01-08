@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .models import RunConfig, load_tasks
+from .models import RunConfig, load_tasks, load_universe
 from .results import ResultsDB, print_report
 from .runner import TaskRunner
 from .zoo import Zoo, ZooConfig
@@ -64,6 +64,7 @@ def list_tasks(
 @app.command()
 def run(
     config: Path = typer.Argument(..., help="Path to tasks JSON file"),
+    universe: Path = typer.Option(..., "--universe", "-u", help="Path to universe YAML file"),
     task_ids: str = typer.Option(None, "--tasks", "-t", help="Comma-separated task IDs"),
     limit: int = typer.Option(None, "--limit", "-n", help="Max tasks to run"),
     headless: bool = typer.Option(True, help="Run browser headlessly"),
@@ -77,7 +78,21 @@ def run(
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
 ):
     """Run evaluation tasks."""
+    # Load universe
+    universe_obj = load_universe(universe)
+
+    # Load tasks
     tasks = load_tasks(config)
+
+    # Validate task compatibility with universe
+    incompatible = [
+        t for t in tasks
+        if t.compatible_universes and universe_obj.name not in t.compatible_universes
+    ]
+    if incompatible:
+        console.print(f"[red]Error: {len(incompatible)} tasks incompatible with universe '{universe_obj.name}'[/red]")
+        console.print(f"[red]Incompatible task IDs: {[t.task_id for t in incompatible]}[/red]")
+        raise typer.Exit(1)
 
     # Filter by task IDs if specified
     if task_ids:
@@ -128,20 +143,23 @@ def run(
         model=model,
         shared_browser=shared_browser,
     )
-    runner = TaskRunner(zoo, run_config)
+    runner = TaskRunner(zoo, universe_obj.agents, run_config)
 
     async def execute():
         await runner.setup()
         try:
-            for task in tasks:
-                console.print(f"  Task {task.task_id}: {task.intent[:50]}...")
-                result = await runner.run_and_evaluate(task)
+            console.print(f"  Running {len(tasks)} task(s) across {len(universe_obj.agents)} agent(s)...")
 
-                # Save immediately after each task
+            # Run all tasks with agent assignment
+            results = await runner.run_and_evaluate_batch(tasks)
+
+            # Save and display results
+            for result in results:
                 db.save_result(run_id, result)
-
                 status = "[green]PASS[/green]" if result.passed else "[red]FAIL[/red]"
-                console.print(f"    {status} ({result.task_result.duration_seconds:.1f}s)")
+                console.print(
+                    f"  Task {result.task.task_id}: {status} ({result.task_result.duration_seconds:.1f}s)"
+                )
         finally:
             await runner.teardown()
 

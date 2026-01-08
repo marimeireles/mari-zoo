@@ -1,18 +1,10 @@
 tasks:
-- id: 9999
+- id: 1
   sites:
-  - auth
-  intent: Two agents navigate the Zoo environment
+  intent: Tell me what the main heading says on this page
   start_url: https://home.zoo
-  agents:
-    - role: explorer
-      name: Alice
-      persona: A curious explorer who investigates the auth service
-      initial_task: Navigate to https://auth.zoo and read the main heading
-    - role: verifier
-      name: Bob
-      persona: A careful verifier who checks the homepage
-      initial_task: Stay on the homepage and identify what services are available
+  compatible_universes:
+    - startup_universe
   require_login: false
   require_reset: false
   eval:
@@ -20,4 +12,36 @@ tasks:
     - string_match
     answers:
       must_include:
-      - Zoo
+      - home
+
+- id: 2
+  sites:
+  - auth
+  intent: Navigate to https://auth.zoo and tell me what you see
+  start_url: https://home.zoo
+  compatible_universes:
+    - startup_universe
+  require_login: false
+  require_reset: false
+  eval:
+    types:
+    - string_match
+    answers:
+      must_include:
+      - auth
+
+- id: 3
+  sites:
+  - gitea
+  intent: Navigate to https://gitea.zoo and tell me what you see
+  start_url: https://home.zoo
+  compatible_universes:
+    - startup_universe
+  require_login: false
+  require_reset: false
+  eval:
+    types:
+    - string_match
+    answers:
+      must_include:
+      - gitea

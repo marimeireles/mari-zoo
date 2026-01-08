@@ -1,0 +1,26 @@
+name: startup_universe
+sites:
+  - mail
+  - kanban
+  - gitea
+  - wiki
+agents:
+  - role: cofounder
+    name: alice
+    persona:
+    goal:
+
+  - role: senior_engineer
+    name: bob
+    persona:
+    goal:
+
+  - role: junior_engineer
+    name: charlie
+    persona:
+    goal:
+
+  - role: pm
+    name: diana
+    persona:
+    goal:

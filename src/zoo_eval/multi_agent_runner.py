@@ -82,7 +82,7 @@ class MultiAgentRunner:
             login_hint = get_login_hint(task.sites) if task.require_login else ""
             full_task = (
                 f"You are {agent_config.name}, {agent_config.persona}. "
-                f"Go to {start_url}. {login_hint}{agent_config.initial_task}"
+                f"Go to {start_url}. {login_hint}{agent_config.goal}"
             )
 
             # Create agent
@@ -160,7 +160,9 @@ class MultiAgentRunner:
                 except Exception:
                     pass
 
-    async def _run_shared_browser_task(self, task: Task, start_url: str) -> TaskResult:
+    async def _run_shared_browser_task(
+        self, agents: list[AgentConfig], task: Task, start_url: str
+    ) -> TaskResult:
         """Run multi-agent task with shared browser and memory."""
         from browser_use import Agent
 
@@ -173,7 +175,7 @@ class MultiAgentRunner:
             browser = await self._create_browser()
 
             # Run agents sequentially, sharing browser and memory
-            for agent_config in task.agents:
+            for agent_config in agents:
                 start_time = time.time()
 
                 try:
@@ -181,7 +183,7 @@ class MultiAgentRunner:
                     login_hint = get_login_hint(task.sites) if task.require_login else ""
                     full_task = (
                         f"You are {agent_config.name}, {agent_config.persona}. "
-                        f"Go to {start_url}. {login_hint}{agent_config.initial_task}"
+                        f"Go to {start_url}. {login_hint}{agent_config.goal}"
                     )
 
                     # Create agent with shared browser
@@ -280,8 +282,40 @@ class MultiAgentRunner:
                 except Exception:
                     pass
 
-    async def run_multi_agent_task(self, task: Task) -> TaskResult:
-        """Run a multi-agent task - either concurrent (separate browsers) or sequential (shared browser)."""
+    def _assign_tasks_to_agents(
+        self, agents: list[AgentConfig], tasks: list[Task]
+    ) -> dict[str, list[Task]]:
+        """Assign tasks to agents sequentially. Extra tasks go to last agent."""
+        assignment = {agent.name: [] for agent in agents}
+
+        if not tasks:
+            return assignment
+
+        # Assign tasks to agents sequentially
+        for i, task in enumerate(tasks):
+            if i < len(agents):
+                assignment[agents[i].name].append(task)
+            else:
+                # Overflow: assign to last agent
+                assignment[agents[-1].name].append(task)
+
+        # Warn if overflow
+        overflow_count = len(tasks) - len(agents)
+        if overflow_count > 0:
+            import sys
+
+            print(
+                f"Warning: {overflow_count} extra task(s) assigned to last agent ({agents[-1].name}). "
+                "This is normal for --shared-browser mode.",
+                file=sys.stderr,
+            )
+
+        return assignment
+
+    async def run_multi_agent_tasks(
+        self, agents: list[AgentConfig], tasks: list[Task]
+    ) -> list[TaskResult]:
+        """Run multiple tasks distributed across agents."""
         # Restart Zoo for clean state
         self.zoo.restart()
         # Wait for Zoo to be ready
@@ -290,45 +324,60 @@ class MultiAgentRunner:
                 break
             time.sleep(1)
 
-        overall_start = time.time()
-        start_url = self.zoo.resolve_url(task.start_url)
+        # Assign tasks to agents
+        assignment = self._assign_tasks_to_agents(agents, tasks)
 
-        try:
-            # Reset if required
-            if task.require_reset:
-                self.zoo.reset_databases()
+        # Reset if any task requires it
+        if any(t.require_reset for t in tasks):
+            self.zoo.reset_databases()
 
-            # Route to appropriate execution mode
-            if self.config.shared_browser:
-                return await self._run_shared_browser_task(task, start_url)
+        all_results = []
 
-            # Default: Run all agents concurrently with separate browsers
-            agent_tasks = [
-                self._run_single_agent(agent_config, task, start_url)
-                for agent_config in task.agents
-            ]
-            agent_results = await asyncio.gather(*agent_tasks)
+        if self.config.shared_browser:
+            # Shared browser: run agents sequentially
+            for agent in agents:
+                agent_tasks = assignment[agent.name]
+                if not agent_tasks:
+                    continue  # Skip idle agents
 
-            # Aggregate results
-            all_succeeded = all(r.success for r in agent_results)
-            combined_answer = "\n\n".join(
-                f"[{r.agent_name}]: {r.answer}" for r in agent_results if r.answer
+                for task in agent_tasks:
+                    start_url = self.zoo.resolve_url(task.start_url)
+                    result = await self._run_shared_browser_task([agent], task, start_url)
+                    all_results.append(result)
+        else:
+            # Separate browsers: run all agents concurrently
+            async def run_agent_tasks(agent: AgentConfig) -> list[TaskResult]:
+                """Run all tasks assigned to this agent."""
+                agent_tasks = assignment[agent.name]
+                results = []
+
+                for task in agent_tasks:
+                    start_url = self.zoo.resolve_url(task.start_url)
+                    agent_result = await self._run_single_agent(agent, task, start_url)
+
+                    # Convert AgentResult to TaskResult
+                    task_result = TaskResult(
+                        task_id=task.task_id,
+                        success=agent_result.success,
+                        agent_results=[agent_result],
+                        agent_answer=agent_result.answer,
+                        final_url=agent_result.final_url,
+                        page_content=agent_result.page_content,
+                        error=agent_result.error,
+                        steps=agent_result.steps,
+                        duration_seconds=agent_result.duration_seconds,
+                    )
+                    results.append(task_result)
+
+                return results
+
+            # Run all agents concurrently
+            agent_results_lists = await asyncio.gather(
+                *[run_agent_tasks(agent) for agent in agents]
             )
-            total_steps = sum(r.steps for r in agent_results)
 
-            return TaskResult(
-                task_id=task.task_id,
-                success=all_succeeded,
-                agent_results=list(agent_results),
-                agent_answer=combined_answer if combined_answer else None,
-                steps=total_steps,
-                duration_seconds=time.time() - overall_start,
-            )
+            # Flatten results
+            for results_list in agent_results_lists:
+                all_results.extend(results_list)
 
-        except Exception as e:
-            return TaskResult(
-                task_id=task.task_id,
-                success=False,
-                error=str(e),
-                duration_seconds=time.time() - overall_start,
-            )
+        return all_results
