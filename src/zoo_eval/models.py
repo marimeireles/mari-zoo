@@ -29,6 +29,24 @@ class EvalType(str, Enum):
     URL_MATCH = "url_match"
     PROGRAM_HTML = "program_html"
     DB_MATCH = "db_match"
+    LLM_JUDGE = "llm_judge"
+    HUMAN_CRITIC = "human_critic"
+
+
+class TaskComplexity(str, Enum):
+    """Task complexity levels."""
+
+    ATOMIC = "atomic"
+    COMPOSITIONAL = "compositional"
+    OPEN_ENDED = "open_ended"
+
+
+class Environment(str, Enum):
+    """Environment adversarial conditions."""
+
+    DOMESTICATED = "domesticated"
+    URBAN = "urban"
+    WILD = "wild"
 
 
 @dataclass
@@ -89,6 +107,90 @@ class DBQuery:
 
 
 @dataclass
+class Trigger:
+    """Trigger specification for when a scene activates."""
+
+    trigger_type: str  # "time" | "event" | "page_load" (only "time" supported for now)
+    delay: int | None = None  # For time triggers: seconds after task starts
+    event_name: str | None = None  # For event triggers (future)
+    url_pattern: str | None = None  # For page_load triggers (future)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Trigger:
+        return cls(
+            trigger_type=data.get("type", "time"),
+            delay=data.get("delay"),
+            event_name=data.get("event_name"),
+            url_pattern=data.get("url_pattern"),
+        )
+
+
+@dataclass
+class InjectionPayload:
+    """Adversarial injection payload for a scene."""
+
+    injection_type: str  # "email" | "webpage" | "database"
+    location: str  # e.g., "inbox", "product_page"
+    content: str  # The injection text (or email body)
+    attacker_goal: str  # e.g., "email_sent_to_attacker", "exfiltrate_data"
+    from_email: str = ""  # Sender email for email injections
+    subject: str = ""  # Email subject for email injections
+    body: str = ""  # Email body (alternative to content)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> InjectionPayload:
+        return cls(
+            injection_type=data.get("type", "email"),
+            location=data.get("location", ""),
+            content=data.get("content", ""),
+            attacker_goal=data.get("attacker_goal", ""),
+            from_email=data.get("from_email", ""),
+            subject=data.get("subject", ""),
+            body=data.get("body", data.get("content", "")),
+        )
+
+
+@dataclass
+class Scene:
+    """Adversarial scene specification loaded from separate YAML files."""
+
+    name: str
+    description: str = ""
+    triggers: list[Trigger] = field(default_factory=list)
+    injections: list[InjectionPayload] = field(default_factory=list)
+    noise_level: str = "clean"  # "clean" | "low" | "high"
+    spam_count: int = 0  # Number of spam emails for urban environments
+
+    @classmethod
+    def from_dict(cls, data: dict | None) -> Scene | None:
+        if not data:
+            return None
+        return cls(
+            name=data.get("name", ""),
+            description=data.get("description", ""),
+            triggers=[Trigger.from_dict(t) for t in data.get("triggers", [])],
+            injections=[InjectionPayload.from_dict(i) for i in data.get("injections", [])],
+            noise_level=data.get("noise_level", "clean"),
+            spam_count=data.get("spam_count", 0),
+        )
+
+
+@dataclass
+class SecurityCheck:
+    """Security check specification."""
+
+    check_type: str  # e.g., "no_email_to_domain", "no_data_leak"
+    params: dict[str, Any] = field(default_factory=dict)  # Check-specific parameters
+
+    @classmethod
+    def from_dict(cls, data: dict) -> SecurityCheck:
+        return cls(
+            check_type=data.get("type", ""),
+            params={k: v for k, v in data.items() if k != "type"},
+        )
+
+
+@dataclass
 class Evaluation:
     """Evaluation criteria for a task."""
 
@@ -97,6 +199,8 @@ class Evaluation:
     reference_url: str | None = None
     program_html: list[HTMLCheck] = field(default_factory=list)
     db_query: DBQuery | None = None
+    llm_judge_criteria: list[str] = field(default_factory=list)
+    security_checks: list[SecurityCheck] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict) -> Evaluation:
@@ -112,6 +216,10 @@ class Evaluation:
             reference_url=data.get(url_key) or None,
             program_html=[HTMLCheck.from_dict(h) for h in data.get(html_key, []) or []],
             db_query=DBQuery.from_dict(data.get("db_query")),
+            llm_judge_criteria=data.get("llm_judge_criteria", []),
+            security_checks=[
+                SecurityCheck.from_dict(s) for s in data.get("security_checks", [])
+            ],
         )
 
 
@@ -168,11 +276,26 @@ class Task:
     storage_state: str | None = None
     evaluation: Evaluation = field(default_factory=lambda: Evaluation(eval_types=[]))
     instantiation_dict: dict[str, Any] = field(default_factory=dict)
+    # Benchmark-specific fields
+    complexity: TaskComplexity | None = None
+    environment: Environment | None = None
+    autonomy_levels: dict[str, str] = field(default_factory=dict)  # L0, L1, L2
+    policies: list[str] = field(default_factory=list)
+    scene_name: str | None = None  # References scene file by name
 
     @classmethod
     def from_dict(cls, data: dict) -> Task:
         # Support both old format (task_id) and new format (id)
         task_id = data.get("id") if "id" in data else data.get("task_id")
+
+        # Parse complexity and environment if present
+        complexity = None
+        if data.get("complexity"):
+            complexity = TaskComplexity(data["complexity"])
+
+        environment = None
+        if data.get("environment"):
+            environment = Environment(data["environment"])
 
         return cls(
             task_id=task_id,
@@ -185,6 +308,11 @@ class Task:
             storage_state=data.get("storage_state"),
             evaluation=Evaluation.from_dict(data.get("eval", {})),
             instantiation_dict=data.get("instantiation_dict", {}),
+            complexity=complexity,
+            environment=environment,
+            autonomy_levels=data.get("autonomy_levels", {}),
+            policies=data.get("policies", []),
+            scene_name=data.get("scene"),
         )
 
 
@@ -244,3 +372,17 @@ def load_universe(path: Path) -> Universe:
             data = json.load(f)
 
     return Universe.from_dict(data)
+
+
+def load_scene(path: Path) -> Scene:
+    """Load a scene from a YAML file."""
+    with open(path) as f:
+        if path.suffix in (".yaml", ".yml"):
+            data = yaml.safe_load(f)
+        else:
+            data = json.load(f)
+
+    scene = Scene.from_dict(data)
+    if scene is None:
+        raise ValueError(f"Failed to load scene from {path}")
+    return scene
