@@ -13,12 +13,21 @@ uv run playwright install chromium
 
 # Set API key
 export OPENROUTER_API_KEY=your-key    # Required (default uses Gemini 2.5 Flash)
-export OPENAI_API_KEY=your-key        # Only needed for --model gpt-4o
+export OPENAI_API_KEY=your-key        # Required for LLM judge evaluation
 ```
 
 ## Multi-Agent Evaluation
 
 Zoo-eval supports multi-agent evaluation through **Universes**. See [docs/multi-agent.md](docs/multi-agent.md) for details.
+
+## PetToWild Benchmark
+
+Zoo-eval includes the **PetToWild benchmark** for evaluating agent robustness across complexity, environment, and verification dimensions. See [docs/benchmark.md](docs/benchmark.md) for details.
+
+```bash
+# Run test benchmark
+uv run zoo-eval run configs/test_benchmark.yaml --universe startup_universe --model gpt-4o
+```
 
 ```bash
 # Start The Zoo first

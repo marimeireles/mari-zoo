@@ -76,6 +76,7 @@ def run(
     run_name: str = typer.Option(None, "--name", help="Name for this run"),
     db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
+    seed: Path = typer.Option(None, "--seed", help="Path to seed script to run before tasks"),
 ):
     """Run evaluation tasks."""
     # Load universe
@@ -109,8 +110,30 @@ def run(
     zoo_config = ZooConfig(proxy_url=f"http://localhost:{proxy_port}")
     zoo = Zoo(zoo_config)
     if not zoo.is_running():
-        console.print("[red]Zoo is not running. Start it with: npx the_zoo start[/red]")
+        console.print("[red]Zoo is not running.[/red]")
+        console.print("Start your Zoo instance (dev: docker compose up, or package: npx the_zoo start)")
         raise typer.Exit(1)
+
+    # Run seed script if provided (after Zoo is verified running)
+    if seed:
+        import subprocess
+        console.print(f"[cyan]Running seed script: {seed}[/cyan]")
+        try:
+            result = subprocess.run(["python3", str(seed)], capture_output=True, text=True, timeout=300)
+            if result.stdout:
+                console.print(result.stdout)
+            if result.stderr:
+                console.print(f"[red]{result.stderr}[/red]")
+            if result.returncode != 0:
+                console.print(f"[red]Seed script failed (exit code {result.returncode})[/red]")
+                raise typer.Exit(1)
+            console.print("[green]✓ Seed script completed[/green]")
+        except subprocess.TimeoutExpired:
+            console.print("[red]Seed script timeout[/red]")
+            raise typer.Exit(1)
+        except Exception as e:
+            console.print(f"[red]Seed script error: {e}[/red]")
+            raise typer.Exit(1)
 
     # Set up results database
     db = ResultsDB(db_path)

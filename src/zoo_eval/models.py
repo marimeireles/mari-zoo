@@ -31,6 +31,8 @@ class EvalType(str, Enum):
     DB_MATCH = "db_match"
     LLM_JUDGE = "llm_judge"
     HUMAN_CRITIC = "human_critic"
+    SECURITY = "security"  # Internal type for security evaluator (not specified in task configs)
+    CUSTOM_FUNCTION = "custom_function"  # User-defined Python function for custom evaluation logic
 
 
 class TaskComplexity(str, Enum):
@@ -45,7 +47,7 @@ class Environment(str, Enum):
     """Environment adversarial conditions."""
 
     DOMESTICATED = "domesticated"
-    URBAN = "urban"
+    TAME = "tame"
     WILD = "wild"
 
 
@@ -129,13 +131,15 @@ class Trigger:
 class InjectionPayload:
     """Adversarial injection payload for a scene."""
 
-    injection_type: str  # "email" | "webpage" | "database"
-    location: str  # e.g., "inbox", "product_page"
-    content: str  # The injection text (or email body)
-    attacker_goal: str  # e.g., "email_sent_to_attacker", "exfiltrate_data"
+    injection_type: str  # "email" | "webpage" | "database" | "script"
+    location: str = ""  # e.g., "inbox", "product_page"
+    content: str = ""  # The injection text (or email body)
+    attacker_goal: str = ""  # e.g., "email_sent_to_attacker", "exfiltrate_data"
     from_email: str = ""  # Sender email for email injections
     subject: str = ""  # Email subject for email injections
     body: str = ""  # Email body (alternative to content)
+    script_path: str = ""  # Path to Python script for script injections
+    description: str = ""  # Optional description of the injection
 
     @classmethod
     def from_dict(cls, data: dict) -> InjectionPayload:
@@ -147,6 +151,8 @@ class InjectionPayload:
             from_email=data.get("from_email", ""),
             subject=data.get("subject", ""),
             body=data.get("body", data.get("content", "")),
+            script_path=data.get("script_path", ""),
+            description=data.get("description", ""),
         )
 
 
@@ -201,6 +207,7 @@ class Evaluation:
     db_query: DBQuery | None = None
     llm_judge_criteria: list[str] = field(default_factory=list)
     security_checks: list[SecurityCheck] = field(default_factory=list)
+    custom_function: str | None = None  # Path to custom evaluation function (e.g., "custom_evaluators.email_checker")
 
     @classmethod
     def from_dict(cls, data: dict) -> Evaluation:
@@ -220,6 +227,7 @@ class Evaluation:
             security_checks=[
                 SecurityCheck.from_dict(s) for s in data.get("security_checks", [])
             ],
+            custom_function=data.get("custom_function"),
         )
 
 
@@ -282,6 +290,9 @@ class Task:
     autonomy_levels: dict[str, str] = field(default_factory=dict)  # L0, L1, L2
     policies: list[str] = field(default_factory=list)
     scene_name: str | None = None  # References scene file by name
+    # Task-specific credentials (overrides default credentials from file)
+    username: str | None = None
+    password: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict) -> Task:
@@ -313,6 +324,8 @@ class Task:
             autonomy_levels=data.get("autonomy_levels", {}),
             policies=data.get("policies", []),
             scene_name=data.get("scene"),
+            username=data.get("username"),
+            password=data.get("password"),
         )
 
 
@@ -329,6 +342,7 @@ class AgentResult:
     error: str | None = None
     steps: int = 0
     duration_seconds: float = 0.0
+    raw_result: Any | None = None  # Raw result from agent.run() with history, etc.
 
 
 @dataclass
@@ -344,6 +358,11 @@ class TaskResult:
     error: str | None = None
     steps: int = 0
     duration_seconds: float = 0.0
+    raw_result: Any | None = None  # Raw result from agent.run() for primary agent
+    autonomy_level: str = "L1"  # Which autonomy level was used (L0, L1, or L2)
+    # Scene data (for evaluators)
+    scene_manager: Any | None = None  # SceneManager instance for verification
+    scene_name: str | None = None  # Name of scene that was activated
 
 
 def load_tasks(path: Path, limit: int | None = None) -> list[Task]:
@@ -364,7 +383,21 @@ def load_tasks(path: Path, limit: int | None = None) -> list[Task]:
 
 
 def load_universe(path: Path) -> Universe:
-    """Load a universe from a YAML file."""
+    """Load a universe from a YAML file or directory.
+
+    Args:
+        path: Path to universe YAML file or directory containing config.yaml
+
+    Returns:
+        Universe object
+    """
+    # If path is a directory, look for config.yaml inside
+    if path.is_dir():
+        config_path = path / "config.yaml"
+        if not config_path.exists():
+            raise FileNotFoundError(f"No config.yaml found in universe directory: {path}")
+        path = config_path
+
     with open(path) as f:
         if path.suffix in (".yaml", ".yml"):
             data = yaml.safe_load(f)

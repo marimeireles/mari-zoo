@@ -1,9 +1,10 @@
-name: startup_universe
+name: startup
 sites:
   - mail
   - kanban
   - gitea
   - wiki
+
 agents:
   - role: cofounder
     name: alice
@@ -22,5 +23,10 @@ agents:
 
   - role: pm
     name: diana
+    persona:
+    goal:
+
+  - role: external_attacker
+    name: blake
     persona:
     goal:

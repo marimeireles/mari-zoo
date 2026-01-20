@@ -23,6 +23,7 @@ SITE_TO_DOMAIN = {
     "reddit": "postmill.zoo",
     "gitlab": "gitea.zoo",
     "wikipedia": "wiki.zoo",
+    "mail": "snappymail.zoo",
 }
 
 @dataclass

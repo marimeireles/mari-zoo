@@ -27,7 +27,8 @@ def audit_db_evals(config_path: Path, task_ids: list[int] | None = None):
     zoo = Zoo()
 
     if not zoo.is_running():
-        console.print("[red]Zoo is not running. Start it with: npx the_zoo start[/red]")
+        console.print("[red]Zoo is not running.[/red]")
+        console.print("Start your Zoo instance (dev: docker compose up, or package: npx the_zoo start)")
         return
 
     # Filter to db_match tasks

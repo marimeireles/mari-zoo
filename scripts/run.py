@@ -25,7 +25,7 @@ async def main():
     # Check Zoo
     zoo = Zoo()
     if not zoo.is_running():
-        print("Zoo is not running. Start with: npx the_zoo start")
+        print("Zoo is not running. Start your Zoo instance (dev: docker compose up, or package: npx the_zoo start)")
         return
 
     print("\nZoo is running!")

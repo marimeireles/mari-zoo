@@ -51,8 +51,15 @@ class TaskRunner:
         """Clean up resources."""
         pass
 
-    async def run_and_evaluate_batch(self, tasks: list[Task]) -> list[RunResult]:
-        """Run multiple tasks distributed across agents and evaluate results."""
+    async def run_and_evaluate_batch(
+        self, tasks: list[Task], universe_name: str = "unknown"
+    ) -> list[RunResult]:
+        """Run multiple tasks distributed across agents and evaluate results.
+
+        Args:
+            tasks: Tasks to run
+            universe_name: Name of the universe (for human review file organization)
+        """
         # Run all tasks with agent assignment
         task_results = await self._multi_agent_runner.run_multi_agent_tasks(
             self.agents, tasks
@@ -63,7 +70,13 @@ class TaskRunner:
         for task_result in task_results:
             # Find the corresponding task
             task = next(t for t in tasks if t.task_id == task_result.task_id)
-            eval_results = evaluate_task(task_result, task.evaluation)
+            # Pass task and universe_name to evaluators
+            eval_results = await evaluate_task(
+                task_result,
+                task.evaluation,
+                task=task,
+                universe_name=universe_name,
+            )
             run_results.append(
                 RunResult(task=task, task_result=task_result, eval_results=eval_results)
             )

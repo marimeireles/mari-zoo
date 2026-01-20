@@ -2,10 +2,24 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 
 import httpx
+
+
+def get_zoo_cli_command() -> list[str]:
+    """Get the Zoo CLI command to use.
+
+    Respects ZOO_CLI_PATH env var if set, otherwise uses npx.
+    To use dev version: export ZOO_CLI_PATH=/path/to/the_zoo/dist/bin/thezoo.js
+    Or run 'npm link' in the_zoo directory to symlink dev version globally.
+    """
+    cli_path = os.environ.get("ZOO_CLI_PATH")
+    if cli_path:
+        return ["node", cli_path]
+    return ["npx", "the_zoo"]
 
 # URL mappings for WebArena-style placeholders
 URL_MAPPINGS = {
@@ -52,10 +66,16 @@ class Zoo:
 
     def run_cli(self, *args: str) -> subprocess.CompletedProcess:
         """Run a Zoo CLI command."""
-        cmd = ["npx", "the_zoo", *args]
+        cmd = get_zoo_cli_command() + list(args)
         if self.config.instance:
             cmd.extend(["--instance", self.config.instance])
-        return subprocess.run(cmd, capture_output=True, text=True)
+
+        # If using dev CLI path, set ZOO_DEV=1 to use main dev instance
+        env = os.environ.copy()
+        if os.environ.get("ZOO_CLI_PATH"):
+            env["ZOO_DEV"] = "1"
+
+        return subprocess.run(cmd, capture_output=True, text=True, env=env)
 
     def is_running(self) -> bool:
         """Check if Zoo is running and accessible."""

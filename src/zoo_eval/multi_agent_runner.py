@@ -9,6 +9,7 @@ from typing import Any
 
 from .auth import get_login_hint
 from .models import AgentConfig, AgentResult, RunConfig, Task, TaskResult
+from .scenes import SceneManager
 from .zoo import Zoo
 
 
@@ -41,6 +42,7 @@ class MultiAgentRunner:
         model = aliases.get(model, model)
 
         # Use OpenRouter for non-OpenAI models
+        # TODO add options to deal with LLM providers other than OpenAIs
         if "/" in model:
             return ChatOpenAI(
                 model=model,
@@ -66,7 +68,7 @@ class MultiAgentRunner:
         )
 
     async def _run_single_agent(
-        self, agent_config: AgentConfig, task: Task, start_url: str
+        self, agent_config: AgentConfig, task: Task, start_url: str, autonomy_level: str = "L1"
     ) -> AgentResult:
         """Run a single agent and return its result."""
         from browser_use import Agent
@@ -80,9 +82,11 @@ class MultiAgentRunner:
 
             # Build agent-specific task
             login_hint = get_login_hint(task.sites) if task.require_login else ""
+            # Use autonomy level if available, otherwise fall back to intent
+            task_instruction = task.autonomy_levels.get(autonomy_level, task.intent) if task.autonomy_levels else task.intent
             full_task = (
                 f"You are {agent_config.name}, {agent_config.persona}. "
-                f"Go to {start_url}. {login_hint}{agent_config.goal}"
+                f"Go to {start_url}. {login_hint}{task_instruction}"
             )
 
             # Create agent
@@ -92,10 +96,36 @@ class MultiAgentRunner:
                 browser=browser,
             )
 
-            # Run the agent with timeout
+            # Closure to capture page HTML at each step
+            last_page_html = {'html': None, 'url': None}
+
+            async def step_hook(agent_instance):
+                """Capture page HTML after each step."""
+                try:
+                    cdp_session = await agent_instance.browser_session.get_or_create_cdp_session()
+
+                    # Get page HTML content via CDP
+                    doc = await cdp_session.cdp_client.send.DOM.getDocument(
+                        session_id=cdp_session.session_id
+                    )
+                    html_result = await cdp_session.cdp_client.send.DOM.getOuterHTML(
+                        params={'nodeId': doc['root']['nodeId']},
+                        session_id=cdp_session.session_id
+                    )
+                    last_page_html['html'] = html_result['outerHTML']
+
+                    # Also capture URL
+                    page = await browser.get_current_page()
+                    if page:
+                        last_page_html['url'] = page.url
+                except Exception as e:
+                    # Silently fail - we'll still have previous capture or None
+                    pass
+
+            # Run the agent with timeout and step hook
             try:
                 result = await asyncio.wait_for(
-                    agent.run(max_steps=self.config.max_steps),
+                    agent.run(max_steps=self.config.max_steps, on_step_end=step_hook),
                     timeout=self.config.timeout_seconds,
                 )
             except asyncio.TimeoutError:
@@ -107,11 +137,12 @@ class MultiAgentRunner:
                     duration_seconds=time.time() - start_time,
                 )
 
+            # Use captured page content from step hook
+            final_url = last_page_html['url']
+            page_content = last_page_html['html']
+
             # Extract results from agent
             agent_answer = None
-            final_url = None
-            page_content = None
-
             if result:
                 # Get the agent's final result
                 if hasattr(result, "final_result"):
@@ -123,14 +154,6 @@ class MultiAgentRunner:
                             else str(fr)
                         )
 
-                # Try to get current page info
-                try:
-                    final_url = await browser.get_current_page_url()
-                    page = await browser.get_current_page()
-                    if page:
-                        page_content = await page.content()
-                except Exception:
-                    pass
 
             return AgentResult(
                 agent_name=agent_config.name,
@@ -141,6 +164,7 @@ class MultiAgentRunner:
                 page_content=page_content,
                 steps=len(result.history) if result and hasattr(result, "history") else 0,
                 duration_seconds=time.time() - start_time,
+                raw_result=result,  # Store raw result from agent.run()
             )
 
         except Exception as e:
@@ -153,7 +177,7 @@ class MultiAgentRunner:
             )
 
         finally:
-            # Always clean up the browser
+            # NOW close browser after we've captured everything
             if browser:
                 try:
                     await browser.stop()
@@ -161,7 +185,7 @@ class MultiAgentRunner:
                     pass
 
     async def _run_shared_browser_task(
-        self, agents: list[AgentConfig], task: Task, start_url: str
+        self, agents: list[AgentConfig], task: Task, start_url: str, autonomy_level: str = "L1"
     ) -> TaskResult:
         """Run multi-agent task with shared browser and memory."""
         from browser_use import Agent
@@ -181,9 +205,11 @@ class MultiAgentRunner:
                 try:
                     # Build agent-specific task
                     login_hint = get_login_hint(task.sites) if task.require_login else ""
+                    # Use autonomy level if available, otherwise fall back to intent
+                    task_instruction = task.autonomy_levels.get(autonomy_level, task.intent) if task.autonomy_levels else task.intent
                     full_task = (
                         f"You are {agent_config.name}, {agent_config.persona}. "
-                        f"Go to {start_url}. {login_hint}{agent_config.goal}"
+                        f"Go to {start_url}. {login_hint}{task_instruction}"
                     )
 
                     # Create agent with shared browser
@@ -193,10 +219,36 @@ class MultiAgentRunner:
                         browser=browser,
                     )
 
-                    # Run the agent
+                    # Closure to capture page HTML at each step
+                    last_page_html = {'html': None, 'url': None}
+
+                    async def step_hook(agent_instance):
+                        """Capture page HTML after each step."""
+                        try:
+                            cdp_session = await agent_instance.browser_session.get_or_create_cdp_session()
+
+                            # Get page HTML content via CDP
+                            doc = await cdp_session.cdp_client.send.DOM.getDocument(
+                                session_id=cdp_session.session_id
+                            )
+                            html_result = await cdp_session.cdp_client.send.DOM.getOuterHTML(
+                                params={'nodeId': doc['root']['nodeId']},
+                                session_id=cdp_session.session_id
+                            )
+                            last_page_html['html'] = html_result['outerHTML']
+
+                            # Also capture URL
+                            page = await browser.get_current_page()
+                            if page:
+                                last_page_html['url'] = page.url
+                        except Exception as e:
+                            # Silently fail - we'll still have previous capture or None
+                            pass
+
+                    # Run the agent with step hook
                     try:
                         result = await asyncio.wait_for(
-                            agent.run(max_steps=self.config.max_steps),
+                            agent.run(max_steps=self.config.max_steps, on_step_end=step_hook),
                             timeout=self.config.timeout_seconds,
                         )
                     except asyncio.TimeoutError:
@@ -211,11 +263,12 @@ class MultiAgentRunner:
                         )
                         continue
 
+                    # Use captured page content from step hook
+                    final_url = last_page_html['url']
+                    page_content = last_page_html['html']
+
                     # Extract results
                     agent_answer = None
-                    final_url = None
-                    page_content = None
-
                     if result:
                         if hasattr(result, "final_result"):
                             fr = result.final_result()
@@ -226,13 +279,6 @@ class MultiAgentRunner:
                                     else str(fr)
                                 )
 
-                        try:
-                            final_url = await browser.get_current_page_url()
-                            page = await browser.get_current_page()
-                            if page:
-                                page_content = await page.content()
-                        except Exception:
-                            pass
 
                     agent_results.append(
                         AgentResult(
@@ -244,6 +290,7 @@ class MultiAgentRunner:
                             page_content=page_content,
                             steps=len(result.history) if result and hasattr(result, "history") else 0,
                             duration_seconds=time.time() - start_time,
+                            raw_result=result,  # Store raw result from agent.run()
                         )
                     )
 
@@ -264,6 +311,8 @@ class MultiAgentRunner:
                 f"[{r.agent_name}]: {r.answer}" for r in agent_results if r.answer
             )
             total_steps = sum(r.steps for r in agent_results)
+            # Use the last agent's raw_result for the TaskResult
+            last_raw_result = agent_results[-1].raw_result if agent_results else None
 
             return TaskResult(
                 task_id=task.task_id,
@@ -272,6 +321,8 @@ class MultiAgentRunner:
                 agent_answer=combined_answer if combined_answer else None,
                 steps=total_steps,
                 duration_seconds=time.time() - overall_start,
+                raw_result=last_raw_result,  # Include raw result from last agent
+                autonomy_level=autonomy_level,  # Track which level was used
             )
 
         finally:
@@ -342,8 +393,26 @@ class MultiAgentRunner:
 
                 for task in agent_tasks:
                     start_url = self.zoo.resolve_url(task.start_url)
-                    result = await self._run_shared_browser_task([agent], task, start_url)
-                    all_results.append(result)
+                    task_start_time = time.time()
+
+                    # Activate scene once per task (before autonomy level loop)
+                    scene_manager = None
+                    if task.scene_name:
+                        scene_manager = SceneManager(self.zoo)
+                        await scene_manager.load_and_activate_scene(task.scene_name, task_start_time)
+
+                    try:
+                        # Run each task with all autonomy levels
+                        for autonomy_level in ["L0", "L1", "L2"]:
+                            result = await self._run_shared_browser_task([agent], task, start_url, autonomy_level)
+                            all_results.append(result)
+                    finally:
+                        # Clean up scene manager after all autonomy levels are done
+                        if scene_manager:
+                            try:
+                                await scene_manager.cleanup()
+                            except Exception:
+                                pass
         else:
             # Separate browsers: run all agents concurrently
             async def run_agent_tasks(agent: AgentConfig) -> list[TaskResult]:
@@ -353,21 +422,41 @@ class MultiAgentRunner:
 
                 for task in agent_tasks:
                     start_url = self.zoo.resolve_url(task.start_url)
-                    agent_result = await self._run_single_agent(agent, task, start_url)
+                    task_start_time = time.time()
 
-                    # Convert AgentResult to TaskResult
-                    task_result = TaskResult(
-                        task_id=task.task_id,
-                        success=agent_result.success,
-                        agent_results=[agent_result],
-                        agent_answer=agent_result.answer,
-                        final_url=agent_result.final_url,
-                        page_content=agent_result.page_content,
-                        error=agent_result.error,
-                        steps=agent_result.steps,
-                        duration_seconds=agent_result.duration_seconds,
-                    )
-                    results.append(task_result)
+                    # Activate scene once per task (before autonomy level loop)
+                    scene_manager = None
+                    if task.scene_name:
+                        scene_manager = SceneManager(self.zoo)
+                        await scene_manager.load_and_activate_scene(task.scene_name, task_start_time)
+
+                    try:
+                        # Run each task with all autonomy levels
+                        for autonomy_level in ["L0", "L1", "L2"]:
+                            agent_result = await self._run_single_agent(agent, task, start_url, autonomy_level)
+
+                            # Convert AgentResult to TaskResult
+                            task_result = TaskResult(
+                                task_id=task.task_id,
+                                success=agent_result.success,
+                                agent_results=[agent_result],
+                                agent_answer=agent_result.answer,
+                                final_url=agent_result.final_url,
+                                page_content=agent_result.page_content,
+                                error=agent_result.error,
+                                steps=agent_result.steps,
+                                duration_seconds=agent_result.duration_seconds,
+                                raw_result=agent_result.raw_result,  # Pass through raw result
+                                autonomy_level=autonomy_level,  # Track which level was used
+                            )
+                            results.append(task_result)
+                    finally:
+                        # Clean up scene manager after all autonomy levels are done
+                        if scene_manager:
+                            try:
+                                await scene_manager.cleanup()
+                            except Exception:
+                                pass
 
                 return results
 
