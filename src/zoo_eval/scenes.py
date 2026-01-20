@@ -9,10 +9,43 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
+
+from .helpers import get_zoo_cli_command
 from .models import Scene, Trigger, InjectionPayload, load_scene
 
 if TYPE_CHECKING:
     from .zoo import Zoo
+
+
+def get_default_project() -> str:
+    """Get the default Zoo project name from running containers or environment."""
+    # First check environment variable
+    env_project = os.environ.get("ZOO_COMPOSE_PROJECT_NAME")
+    if env_project:
+        return env_project
+
+    # Try to detect from running containers
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}", "--filter", "name=zoo"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout:
+            # Extract project name from first container (e.g., "thezoo-cli-instance-default-v0-7-0-proxy-1")
+            first_container = result.stdout.strip().split("\n")[0]
+            # Project name is everything before the last service name
+            parts = first_container.rsplit("-", 2)
+            if len(parts) >= 2:
+                return "-".join(parts[:-2])  # Remove service name and replica number
+    except Exception:
+        pass
+
+    # Fallback to common default
+    return "the_zoo"
+
 
 
 class SceneManager:
@@ -93,79 +126,91 @@ class SceneManager:
 
     async def _inject_email(self, injection: InjectionPayload):
         """
-        Inject a malicious email using swaks via the stalwart container.
+        Inject an email using the zoo CLI.
 
         Args:
             injection: Email injection specification
         """
-        # Parse location to extract recipient
-        # Location format: "inbox" or "alice@company.zoo:inbox"
-        if "@" in injection.location:
-            recipient = injection.location.split(":")[0]
-        else:
-            # If no recipient specified, this needs to be set at task level
+        if "@" not in injection.location:
             raise ValueError(
                 f"Email injection location must include recipient email: {injection.location}"
             )
+        recipient = injection.location.split(":")[0]
+        sender = injection.from_email
 
-        # Use swaks to send email
-        # Note: We send from a generic attacker email without authentication
-        swaks_cmd = [
-            "docker",
-            "compose",
-            "exec",
-            "-T",
-            "stalwart",
-            "swaks",
-            "--to",
-            recipient,
-            "--from",
-            injection.from_email or "attacker@external.zoo",
-            "--server",
-            "stalwart:25",  # Use port 25 (no auth required internally)
-            "--header",
-            f"Subject: {injection.subject}",
-            "--body",
-            injection.body or injection.content,
+        if not sender:
+            raise ValueError("Email injection `from_email` cannot be empty.")
+
+        # --- Get sender password ---
+        password = None
+        try:
+            # Extract domain from sender email to find the right credential file
+            domain = sender.split("@")[1]
+            creds_file = Path(f"credentials/{domain}.yaml")
+            if creds_file.exists():
+                with open(creds_file, "r") as f:
+                    creds = yaml.safe_load(f)
+                # Find user in credentials
+                for user_creds in creds.get("users", []):
+                    if user_creds.get("username") == sender:
+                        password = user_creds.get("password")
+                        break
+        except (IndexError, FileNotFoundError) as e:
+            self.injections_log.append({
+                "type": "email", "to": recipient, "error": f"Could not find credentials for {sender}: {e}", "success": False,
+            })
+            return
+
+        if not password:
+            self.injections_log.append({
+                "type": "email", "to": recipient, "error": f"Password not found for {sender} in credentials.", "success": False,
+            })
+            return
+        # --- End password lookup ---
+
+        zoo_cmd = get_zoo_cli_command()
+        cmd = [
+            *zoo_cmd,
+            "email", "send",
+            "--from", sender,
+            "--to", recipient,
+            "--subject", injection.subject,
+            "--body", injection.body or injection.content,
+            "--password", password,
         ]
 
         try:
-            result = subprocess.run(
-                swaks_cmd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
+            # Build env for subprocess
+            env = os.environ.copy()
+            env["COMPOSE_PROJECT_NAME"] = get_default_project()
+            if self.zoo.config and self.zoo.config.zoo_cli_path:
+                env["ZOO_CLI_PATH"] = self.zoo.config.zoo_cli_path
+                env["ZOO_DEV"] = "1"
 
-            if result.returncode == 0:
-                self.injections_log.append(
-                    {
-                        "type": "email",
-                        "to": recipient,
-                        "from": injection.from_email,
-                        "subject": injection.subject,
-                        "attacker_goal": injection.attacker_goal,
-                        "success": True,
-                    }
-                )
-            else:
-                self.injections_log.append(
-                    {
-                        "type": "email",
-                        "to": recipient,
-                        "error": result.stderr,
-                        "success": False,
-                    }
-                )
-        except subprocess.TimeoutExpired:
-            self.injections_log.append(
-                {
-                    "type": "email",
-                    "to": recipient,
-                    "error": "Timeout",
-                    "success": False,
-                }
+            # Use asyncio.create_subprocess_exec for non-blocking call
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
             )
+            stdout, stderr = await process.communicate()
+
+            if process.returncode == 0:
+                self.injections_log.append({
+                    "type": "email", "to": recipient, "from": sender,
+                    "subject": injection.subject, "success": True,
+                })
+            else:
+                error_message = stderr.decode().strip() if stderr else "Unknown CLI error"
+                self.injections_log.append({
+                    "type": "email", "to": recipient, "error": error_message, "success": False,
+                })
+
+        except Exception as e:
+            self.injections_log.append({
+                "type": "email", "to": recipient, "error": str(e), "success": False,
+            })
 
     async def _inject_script(self, injection: InjectionPayload):
         """

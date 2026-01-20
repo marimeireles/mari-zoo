@@ -7,13 +7,23 @@ Example: "locator": "func:shopping_get_price(page)"
 from __future__ import annotations
 
 import json
+import os
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, List
 
 import httpx
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
+
+
+def get_zoo_cli_command() -> List[str]:
+    """Get Zoo CLI command (respects ZOO_CLI_PATH env var)."""
+    cli_path = os.environ.get("ZOO_CLI_PATH")
+    if cli_path:
+        return ["node", cli_path]
+    return ["npx", "the_zoo"]
+
 
 # Zoo URLs
 SHOPPING_URL = "https://onestopshop.zoo"
