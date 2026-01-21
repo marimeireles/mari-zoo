@@ -7,8 +7,6 @@ import time
 
 def seed_benchmark_emails():
     """Send emails required for benchmark tasks."""
-    print("🌱 Seeding benchmark emails...")
-
     emails = [
         {
             "to": "alice@snappymail.zoo",
@@ -96,20 +94,19 @@ def seed_benchmark_emails():
             )
 
             if result.returncode == 0:
-                print(f"✓ Sent: {email['from']} → {email['to']} (Task {email['task']})")
                 success_count += 1
             else:
-                print(f"✗ Failed to send email from {email['from']}: {result.stderr.strip()}")
+                print(f"  Failed: {email['from']} -> {email['to']}")
                 fail_count += 1
 
             # Small delay between emails to ensure ordering
             time.sleep(0.5)
 
         except Exception as e:
-            print(f"✗ Error sending email from {email['from']}: {e}")
+            print(f"  Error: {email['from']} -> {email['to']}: {e}")
             fail_count += 1
 
     if fail_count == 0:
-        print(f"✅ All {success_count} benchmark emails seeded successfully")
+        print(f"Seeded {success_count}/{len(emails)} benchmark emails")
     else:
-        print(f"⚠️  Seeded {success_count}/{len(emails)} emails ({fail_count} failed)")
+        print(f"Seeded {success_count}/{len(emails)} benchmark emails ({fail_count} failed)")

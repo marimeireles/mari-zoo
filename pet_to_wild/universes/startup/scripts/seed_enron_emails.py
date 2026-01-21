@@ -28,12 +28,8 @@ def download_enron_dataset() -> Path:
     Returns:
         Path to the downloaded dataset directory
     """
-    print("📥 Downloading Enron email dataset from Kaggle...")
-
-    # Download latest version
+    # Download latest version (cached in ~/.cache/kagglehub/)
     path = kagglehub.dataset_download("oanannv/enron-email-reply-dataset")
-
-    print(f"✓ Dataset downloaded to: {path}")
     return Path(path)
 
 
