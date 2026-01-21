@@ -31,7 +31,6 @@ class EvalType(str, Enum):
     DB_MATCH = "db_match"
     LLM_JUDGE = "llm_judge"
     HUMAN_CRITIC = "human_critic"
-    SECURITY = "security"  # Internal type for security evaluator (not specified in task configs)
     CUSTOM_FUNCTION = "custom_function"  # User-defined Python function for custom evaluation logic
 
 
@@ -131,10 +130,9 @@ class Trigger:
 class InjectionPayload:
     """Adversarial injection payload for a scene."""
 
-    injection_type: str  # "email" | "webpage" | "database" | "script"
+    injection_type: str  # "email" | "script"
     location: str = ""  # e.g., "inbox", "product_page"
     content: str = ""  # The injection text (or email body)
-    attacker_goal: str = ""  # e.g., "email_sent_to_attacker", "exfiltrate_data"
     from_email: str = ""  # Sender email for email injections
     subject: str = ""  # Email subject for email injections
     body: str = ""  # Email body (alternative to content)
@@ -147,7 +145,6 @@ class InjectionPayload:
             injection_type=data.get("type", "email"),
             location=data.get("location", ""),
             content=data.get("content", ""),
-            attacker_goal=data.get("attacker_goal", ""),
             from_email=data.get("from_email", ""),
             subject=data.get("subject", ""),
             body=data.get("body", data.get("content", "")),
@@ -182,21 +179,6 @@ class Scene:
 
 
 @dataclass
-class SecurityCheck:
-    """Security check specification."""
-
-    check_type: str  # e.g., "no_email_to_domain", "no_data_leak"
-    params: dict[str, Any] = field(default_factory=dict)  # Check-specific parameters
-
-    @classmethod
-    def from_dict(cls, data: dict) -> SecurityCheck:
-        return cls(
-            check_type=data.get("type", ""),
-            params={k: v for k, v in data.items() if k != "type"},
-        )
-
-
-@dataclass
 class Evaluation:
     """Evaluation criteria for a task."""
 
@@ -206,7 +188,6 @@ class Evaluation:
     program_html: list[HTMLCheck] = field(default_factory=list)
     db_query: DBQuery | None = None
     llm_judge_criteria: list[str] = field(default_factory=list)
-    security_checks: list[SecurityCheck] = field(default_factory=list)
     custom_function: str | None = None  # Path to custom evaluation function (e.g., "custom_evaluators.email_checker")
 
     @classmethod
@@ -224,9 +205,6 @@ class Evaluation:
             program_html=[HTMLCheck.from_dict(h) for h in data.get(html_key, []) or []],
             db_query=DBQuery.from_dict(data.get("db_query")),
             llm_judge_criteria=data.get("llm_judge_criteria", []),
-            security_checks=[
-                SecurityCheck.from_dict(s) for s in data.get("security_checks", [])
-            ],
             custom_function=data.get("custom_function"),
         )
 

@@ -25,8 +25,3 @@ agents:
     name: diana
     persona:
     goal:
-
-  - role: external_attacker
-    name: blake
-    persona:
-    goal:
