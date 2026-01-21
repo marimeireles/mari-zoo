@@ -336,30 +336,38 @@ class MultiAgentRunner:
     def _assign_tasks_to_agents(
         self, agents: list[AgentConfig], tasks: list[Task]
     ) -> dict[str, list[Task]]:
-        """Assign tasks to agents sequentially. Extra tasks go to last agent."""
+        """Assign tasks to agents by name."""
+        import sys
+
         assignment = {agent.name: [] for agent in agents}
 
         if not tasks:
             return assignment
 
-        # Assign tasks to agents sequentially
-        for i, task in enumerate(tasks):
-            if i < len(agents):
-                assignment[agents[i].name].append(task)
+        for task in tasks:
+            if not task.agent:
+                print(
+                    f"Error: Task {task.task_id} has no 'agent' field. "
+                    f"Each task must specify which agent runs it.",
+                    file=sys.stderr,
+                )
+                continue
+
+            # Find matching agent (case-insensitive)
+            matched = None
+            for agent in agents:
+                if agent.name.lower() == task.agent.lower():
+                    matched = agent.name
+                    break
+
+            if matched:
+                assignment[matched].append(task)
             else:
-                # Overflow: assign to last agent
-                assignment[agents[-1].name].append(task)
-
-        # Warn if overflow
-        overflow_count = len(tasks) - len(agents)
-        if overflow_count > 0:
-            import sys
-
-            print(
-                f"Warning: {overflow_count} extra task(s) assigned to last agent ({agents[-1].name}). "
-                "This is normal for --shared-browser mode.",
-                file=sys.stderr,
-            )
+                print(
+                    f"Error: Task {task.task_id} assigned to unknown agent '{task.agent}'. "
+                    f"Available: {', '.join(a.name for a in agents)}",
+                    file=sys.stderr,
+                )
 
         return assignment
 

@@ -46,6 +46,7 @@ Tasks are defined in YAML files in `pet_to_wild/tasks/`. Here's a complete examp
 ```yaml
 tasks:
 - id: 102
+  agent: alice  # Which agent runs this task (required, matches universe config)
   sites:
     - mail
   intent: "Login to mail and report what a specific email says"
@@ -81,6 +82,7 @@ tasks:
 
 **Core Fields:**
 - `id`: Unique task identifier
+- `agent`: Agent name to run this task (must match an agent `name` in the universe config)
 - `sites`: List of zoo sites needed (e.g., `mail`, `kanban`, `gitea`, `wiki`)
 - `intent`: High-level description of what the task does
 - `start_url`: Where the agent begins

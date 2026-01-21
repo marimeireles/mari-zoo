@@ -56,11 +56,12 @@ agents:
 
 ## Task Configuration
 
-Tasks specify their intent and compatible universes:
+Tasks specify their intent, which agent runs them, and compatible universes:
 
 ```yaml
 tasks:
 - id: 1
+  agent: alice  # Required: which agent runs this task
   intent: Tell me what the main heading says
   start_url: https://home.zoo
   compatible_universes:
@@ -75,46 +76,45 @@ tasks:
       - home
 
 - id: 2
+  agent: bob  # This task runs as Bob
   intent: Navigate to https://auth.zoo and tell me what you see
   start_url: https://home.zoo
   compatible_universes:
     - startup_universe
+
+- id: 3
+  agent: diana  # This task runs as Diana
+  intent: Send an email to the team
+  start_url: https://snappymail.zoo
+  compatible_universes:
+    - startup_universe
+  require_login: true
+  username: diana@snappymail.zoo
+  password: diana123
 ```
 
 ## Task Assignment
 
-Tasks are assigned to agents **sequentially** based on their order in the YAML:
-- Task 1 → Agent 1 (alice)
-- Task 2 → Agent 2 (bob)
-- Task 3 → Agent 3 (charlie)
-- Task 4 → Agent 4 (diana)
+Each task must specify an `agent` field that matches an agent's `name` from the universe config:
 
-Each agent executes their assigned task using their individual `goal` from the universe.
+```yaml
+# In task file:
+- id: 103
+  agent: diana  # Matches agent name in universe
 
-### Task Overflow
+# In universe config:
+agents:
+  - role: pm
+    name: diana  # This agent will run task 103
+    persona: Product manager
+```
 
-When there are more tasks than agents:
-- All overflow tasks are assigned to the **last agent**
-- A warning is printed: "X extra task(s) assigned to last agent (name)"
-- This is normal for `--shared-browser` mode
+The agent name matching is **case-insensitive** (e.g., `agent: Diana` matches `name: diana`).
 
-Example with 4 agents and 6 tasks:
-- Task 1 → alice
-- Task 2 → bob
-- Task 3 → charlie
-- Task 4 → diana
-- Task 5 → diana (overflow)
-- Task 6 → diana (overflow)
+### Validation
 
-### Idle Agents
-
-If there are more agents than tasks, remaining agents are idle.
-
-Example with 4 agents and 2 tasks:
-- Task 1 → alice
-- Task 2 → bob
-- charlie: idle
-- diana: idle
+- Tasks without an `agent` field will print an error and be skipped
+- Tasks with an unknown agent name will print an error and be skipped
 
 ## Execution Modes
 

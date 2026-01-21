@@ -266,31 +266,55 @@ def print_report(db: ResultsDB, run_id: int):
                 )
         console.print(table)
 
-    # Show failed tasks
-    failed = db.get_failed_tasks(run_id)
-    if failed:
-        console.print(f"\n[bold red]Failed Tasks ({len(failed)}):[/bold red]")
-
-        for row in failed[:10]:  # Show first 10
+    # Show task results by autonomy level
+    all_results = db.get_run_results(run_id)
+    if all_results:
+        # Group results by task_id
+        tasks_by_id: dict[int, dict[str, dict]] = {}
+        for row in all_results:
+            task_id = row["task_id"]
             level = row.get("autonomy_level", "L1")
-            console.print(f"\n  [cyan]Task {row['task_id']} ({level}):[/cyan]")
+            if task_id not in tasks_by_id:
+                tasks_by_id[task_id] = {}
+            tasks_by_id[task_id][level] = row
 
-            # Show agent answer
-            if row["agent_answer"]:
-                answer = row["agent_answer"][:200]
-                if len(row["agent_answer"]) > 200:
-                    answer += "..."
-                console.print(f"    [dim]Agent answered:[/dim] {answer}")
+        console.print(f"\n[bold]Task Results by Autonomy Level:[/bold]")
+        results_table = Table(show_header=True, header_style="bold")
+        results_table.add_column("Task")
+        results_table.add_column("L0")
+        results_table.add_column("L1")
+        results_table.add_column("L2")
 
-            # Show error or eval failure reason
-            reason = row["error"] or ""
-            if not reason and row["eval_results"]:
-                evals = json.loads(row["eval_results"])
-                for e in evals:
-                    if not e["passed"]:
-                        reason = e["details"]
-                        break
-            console.print(f"    [red]Reason:[/red] {reason[:100]}")
+        for task_id in sorted(tasks_by_id.keys()):
+            levels = tasks_by_id[task_id]
+            row_data = [str(task_id)]
 
-        if len(failed) > 10:
-            console.print(f"\n  ... and {len(failed) - 10} more")
+            for level in ["L0", "L1", "L2"]:
+                if level not in levels:
+                    row_data.append("-")
+                    continue
+
+                result = levels[level]
+                if result["passed"]:
+                    row_data.append("[green]PASS[/green]")
+                else:
+                    # Get failure reason
+                    reason = result.get("error") or ""
+                    if not reason and result.get("eval_results"):
+                        evals = json.loads(result["eval_results"])
+                        for e in evals:
+                            if not e["passed"]:
+                                details = e["details"]
+                                if isinstance(details, dict):
+                                    reason = "; ".join(f"{v}" for v in details.values())
+                                else:
+                                    reason = str(details)
+                                break
+                    # Truncate long reasons
+                    if len(reason) > 50:
+                        reason = reason[:47] + "..."
+                    row_data.append(f"[red]{reason or 'FAIL'}[/red]")
+
+            results_table.add_row(*row_data)
+
+        console.print(results_table)

@@ -238,6 +238,7 @@ class Task:
     sites: list[str]
     intent: str
     start_url: str
+    agent: str | None = None  # Agent name to assign this task to (matches universe config)
     compatible_universes: list[str] = field(default_factory=list)
     require_login: bool = False
     require_reset: bool = False
@@ -286,6 +287,7 @@ class Task:
             sites=data.get("sites", []),
             intent=data["intent"],
             start_url=data.get("start_url", ""),
+            agent=data.get("agent"),
             compatible_universes=data.get("compatible_universes", []),
             require_login=data.get("require_login", False),
             require_reset=data.get("require_reset", False),

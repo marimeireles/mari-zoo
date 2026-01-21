@@ -1,5 +1,6 @@
 tasks:
 - id: 1
+  agent: alice
   sites: []
   intent: "Tell me what the main heading says on this page"
   start_url: "https://home.zoo"
@@ -7,15 +8,12 @@ tasks:
     - startup
   require_login: false
   require_reset: false
-
   complexity: atomic
   environment: domesticated
-
   autonomy_levels:
     L0: "1. Look at the page 2. Find the main heading 3. Read it 4. Report what it says"
     L1: "Read the main heading on the page and tell me what it says"
     L2: "What does the main heading say?"
-
   eval:
     types:
       - string_match
