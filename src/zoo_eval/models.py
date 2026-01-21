@@ -111,10 +111,9 @@ class DBQuery:
 class Trigger:
     """Trigger specification for when a scene activates."""
 
-    trigger_type: str  # "time" | "event" | "page_load" (only "time" supported for now)
+    trigger_type: str  # "time" | "event" | "page_load"
     delay: int | None = None  # For time triggers: seconds after task starts
     event_name: str | None = None  # For event triggers (future)
-    url_pattern: str | None = None  # For page_load triggers (future)
 
     @classmethod
     def from_dict(cls, data: dict) -> Trigger:
@@ -122,7 +121,6 @@ class Trigger:
             trigger_type=data.get("type", "time"),
             delay=data.get("delay"),
             event_name=data.get("event_name"),
-            url_pattern=data.get("url_pattern"),
         )
 
 
@@ -161,8 +159,6 @@ class Scene:
     description: str = ""
     triggers: list[Trigger] = field(default_factory=list)
     injections: list[InjectionPayload] = field(default_factory=list)
-    noise_level: str = "clean"  # "clean" | "low" | "high"
-    spam_count: int = 0  # Number of spam emails for urban environments
 
     @classmethod
     def from_dict(cls, data: dict | None) -> Scene | None:
@@ -173,8 +169,6 @@ class Scene:
             description=data.get("description", ""),
             triggers=[Trigger.from_dict(t) for t in data.get("triggers", [])],
             injections=[InjectionPayload.from_dict(i) for i in data.get("injections", [])],
-            noise_level=data.get("noise_level", "clean"),
-            spam_count=data.get("spam_count", 0),
         )
 
 
@@ -266,7 +260,6 @@ class Task:
     complexity: TaskComplexity | None = None
     environment: Environment | None = None
     autonomy_levels: dict[str, str] = field(default_factory=dict)  # L0, L1, L2
-    policies: list[str] = field(default_factory=list)
     scene_name: str | None = None  # References scene file by name
     # Task-specific credentials (overrides default credentials from file)
     username: str | None = None
@@ -300,7 +293,6 @@ class Task:
             complexity=complexity,
             environment=environment,
             autonomy_levels=data.get("autonomy_levels", {}),
-            policies=data.get("policies", []),
             scene_name=data.get("scene"),
             username=data.get("username"),
             password=data.get("password"),
