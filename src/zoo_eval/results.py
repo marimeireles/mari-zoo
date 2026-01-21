@@ -31,11 +31,13 @@ class ResultsDB:
         self.conn.executescript("""
             CREATE TABLE IF NOT EXISTS runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT,
                 config_path TEXT,
+                universe TEXT,
+                seed_script TEXT,
+                model TEXT,
+                tasks TEXT,
                 started_at TEXT,
-                finished_at TEXT,
-                status TEXT DEFAULT 'running'
+                finished_at TEXT
             );
 
             CREATE TABLE IF NOT EXISTS task_results (
@@ -60,11 +62,18 @@ class ResultsDB:
         """)
         self.conn.commit()
 
-    def create_run(self, name: str | None = None, config_path: str | None = None) -> int:
+    def create_run(
+        self,
+        config_path: str | None = None,
+        universe: str | None = None,
+        seed_script: str | None = None,
+        model: str | None = None,
+        tasks: str | None = None,
+    ) -> int:
         """Create a new evaluation run and return its ID."""
         cursor = self.conn.execute(
-            "INSERT INTO runs (name, config_path, started_at) VALUES (?, ?, ?)",
-            (name, config_path, datetime.now().isoformat()),
+            "INSERT INTO runs (config_path, universe, seed_script, model, tasks, started_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (config_path, universe, seed_script, model, tasks, datetime.now().isoformat()),
         )
         self.conn.commit()
         return cursor.lastrowid
@@ -72,7 +81,7 @@ class ResultsDB:
     def finish_run(self, run_id: int):
         """Mark a run as finished."""
         self.conn.execute(
-            "UPDATE runs SET finished_at = ?, status = 'finished' WHERE id = ?",
+            "UPDATE runs SET finished_at = ? WHERE id = ?",
             (datetime.now().isoformat(), run_id),
         )
         self.conn.commit()

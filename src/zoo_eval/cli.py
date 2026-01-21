@@ -73,7 +73,6 @@ def run(
     model: str = typer.Option("google/gemini-2.5-flash-lite", "--model", "-m", help="Model: flash, flash-lite, claude, gpt-4o, or provider/model"),
     shared_browser: bool = typer.Option(False, "--shared-browser", help="All agents share same browser and memory"),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
-    run_name: str = typer.Option(None, "--name", help="Name for this run"),
     db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
     seed: Path = typer.Option(None, "--seed", help="Path to seed script to run before tasks"),
@@ -147,9 +146,21 @@ def run(
             console.print(f"Resuming run #{run_id}: {len(completed)} already done, {len(tasks)} remaining")
         else:
             console.print("[yellow]No previous run found, starting fresh[/yellow]")
-            run_id = db.create_run(run_name, str(config))
+            run_id = db.create_run(
+                config_path=str(config),
+                universe=str(universe),
+                seed_script=str(seed) if seed else None,
+                model=model,
+                tasks=task_ids or "all",
+            )
     else:
-        run_id = db.create_run(run_name, str(config))
+        run_id = db.create_run(
+            config_path=str(config),
+            universe=str(universe),
+            seed_script=str(seed) if seed else None,
+            model=model,
+            tasks=task_ids or "all",
+        )
 
     if not tasks:
         console.print("[green]All tasks already completed![/green]")
@@ -205,23 +216,30 @@ def report(
 
     if list_runs:
         rows = db.conn.execute(
-            "SELECT id, name, config_path, started_at, status FROM runs ORDER BY id DESC LIMIT 20"
+            "SELECT id, config_path, universe, seed_script, model, tasks, started_at FROM runs ORDER BY id DESC LIMIT 20"
         ).fetchall()
 
         table = Table(title="Evaluation Runs")
         table.add_column("ID", style="cyan")
-        table.add_column("Name")
         table.add_column("Config")
+        table.add_column("Universe")
+        table.add_column("Seed Script")
+        table.add_column("Model")
+        table.add_column("Tasks", max_width=30)
         table.add_column("Started")
-        table.add_column("Status")
 
         for row in rows:
+            tasks = row["tasks"]
+            if tasks and len(tasks) > 30:
+                tasks = tasks[:27] + "..."
             table.add_row(
                 str(row["id"]),
-                row["name"] or "-",
                 Path(row["config_path"]).name if row["config_path"] else "-",
+                row["universe"] or "-",
+                row["seed_script"] or "-",
+                row["model"] or "-",
+                tasks or "-",
                 row["started_at"][:19] if row["started_at"] else "-",
-                row["status"] or "-",
             )
         console.print(table)
     else:

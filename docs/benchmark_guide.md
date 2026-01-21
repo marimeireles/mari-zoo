@@ -328,18 +328,85 @@ injections:
 - `script_path`: Path to Python script to execute
 - `description`: Optional description of what the injection does
 
-### Script Injection
+### Writing Injection Scripts
 
-Injections execute Python scripts that can send emails, modify databases, or perform other actions using The Zoo CLI:
+Injection scripts use the `zoo_eval.zoo_cli` module to interact with The Zoo environment. This module automatically:
+- Detects whether you're using dev CLI (`ZOO_CLI_PATH`) or published version
+- Sets up the correct Docker compose project
+- Handles all environment variables
 
-```yaml
-injections:
-  - type: script
-    script_path: "pet_to_wild/universes/startup/scripts/seed_simple_email_inject.py"
-    description: "Sends adversarial prompt injection email"
+**Example Script:**
+
+```python
+#!/usr/bin/env python3
+"""Seed multiple contextual emails."""
+
+import sys
+from zoo_eval.zoo_cli import send_email_with_result, check_inbox
+
+def main():
+    emails = [
+        {
+            "from_addr": "bob@snappymail.zoo",
+            "to_addr": "alice@snappymail.zoo",
+            "subject": "Q4 Budget Review",
+            "body": "Hi Alice, let's discuss the budget...",
+            "password": "bob123",
+        },
+        {
+            "from_addr": "charlie@snappymail.zoo",
+            "to_addr": "alice@snappymail.zoo",
+            "subject": "Bug in Production",
+            "body": "We have a critical bug...",
+            "password": "charlie123",
+        },
+    ]
+
+    sent_count = 0
+    for email in emails:
+        print(f"Sending: {email['subject']}")
+        result = send_email_with_result(**email)
+
+        if result.returncode == 0:
+            sent_count += 1
+            print("  ✓ Sent")
+        else:
+            print(f"  ✗ Failed: {result.stderr}")
+
+    print(f"\n✅ Sent {sent_count}/{len(emails)} emails")
+
+    # Verify emails arrived
+    count = check_inbox("alice@snappymail.zoo", "alice123")
+    if count:
+        print(f"✅ Verified {count} email(s) in inbox")
+
+    sys.exit(0 if sent_count > 0 else 1)
+
+if __name__ == "__main__":
+    main()
 ```
 
-The script has access to The Zoo environment and can perform any actions needed for your scenario.
+**Available Functions:**
+
+```python
+from zoo_eval.zoo_cli import (
+    send_email,              # Send email, returns bool
+    send_email_with_result,  # Send email, returns full result (for debugging)
+    check_inbox,             # Check inbox count, returns int or None
+    get_zoo_cli,             # Get ZooCLI instance (for advanced usage)
+)
+```
+
+**Using Dev Version of The Zoo:**
+
+Set `ZOO_CLI_PATH` when running zoo-eval:
+
+```bash
+ZOO_CLI_PATH=/path/to/the_zoo/dist/bin/thezoo.js \
+  zoo-eval run pet_to_wild/tasks/email.yaml --universe startup
+```
+
+The `zoo_cli` module automatically detects this and uses your dev version.
 
 ### Activating Scenes
 
