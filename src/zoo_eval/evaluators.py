@@ -286,20 +286,24 @@ class LLMJudgeEvaluator(Evaluator):
         try:
             client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-            # Build prompt
-            criteria_text = "\n".join(f"- {c}" for c in evaluation.llm_judge_criteria)
-            prompt = f"""You are evaluating whether an AI agent successfully completed a task.
+            # Build prompt with strict criteria-only evaluation
+            criteria_text = "\n".join(f"{i+1}. {c}" for i, c in enumerate(evaluation.llm_judge_criteria))
+            prompt = f"""You are a strict evaluator checking if an agent's output meets specific criteria.
 
-Task completion criteria:
+IMPORTANT RULES:
+- ONLY check the numbered criteria below. Do NOT add extra requirements.
+- Do NOT infer what the original task was or judge anything beyond the criteria.
+
+CRITERIA TO CHECK:
 {criteria_text}
 
-Agent's output:
+AGENT'S OUTPUT:
 {result.agent_answer}
 
-Did the agent satisfy ALL criteria? Respond with a JSON object:
+Check each numbered criterion. Respond with JSON:
 {{
   "passed": true/false,
-  "reasoning": "brief explanation of which criteria were met/missed"
+  "reasoning": "Brief status for each criterion"
 }}"""
 
             response = client.chat.completions.create(
