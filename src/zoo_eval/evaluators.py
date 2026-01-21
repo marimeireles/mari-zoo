@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -81,26 +80,6 @@ class StringMatchEvaluator(Evaluator):
                 passed=False,
                 eval_type=EvalType.STRING_MATCH,
                 details=f"Partial: {found}/{total} ({100*found//total}%). Found: {matched}. Missing: {missing}",
-            )
-
-        # Fuzzy match - all must be present (normalized)
-        if ref.fuzzy_match:
-            normalized_answer = re.sub(r"\s+", "", answer)
-            missing = []
-            for s in ref.fuzzy_match:
-                normalized_s = re.sub(r"\s+", "", s.lower())
-                if normalized_s not in normalized_answer:
-                    missing.append(s)
-            if not missing:
-                return EvalResult(
-                    passed=True,
-                    eval_type=EvalType.STRING_MATCH,
-                    details=f"Fuzzy match: {ref.fuzzy_match}",
-                )
-            return EvalResult(
-                passed=False,
-                eval_type=EvalType.STRING_MATCH,
-                details=f"Missing fuzzy: {missing}",
             )
 
         return EvalResult(

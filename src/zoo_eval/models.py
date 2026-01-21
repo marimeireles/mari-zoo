@@ -56,7 +56,6 @@ class ReferenceAnswers:
 
     exact_match: str | None = None
     must_include: list[str] = field(default_factory=list)
-    fuzzy_match: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict | None) -> ReferenceAnswers | None:
@@ -65,7 +64,6 @@ class ReferenceAnswers:
         return cls(
             exact_match=data.get("exact_match"),
             must_include=data.get("must_include", []),
-            fuzzy_match=data.get("fuzzy_match", []),
         )
 
 

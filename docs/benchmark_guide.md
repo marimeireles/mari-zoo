@@ -115,10 +115,6 @@ eval:
     must_include:
       - alice
       - snappymail
-
-    # Option 3: Fuzzy match (ignores whitespace)
-    fuzzy_match:
-      - "alice @ snappymail . zoo"
 ```
 
 ### 2. URL Match
@@ -319,9 +315,9 @@ injections:
 **Triggers:**
 - `type`: When to activate
   - `time`: Delay N seconds after task starts
+    - `delay`: Seconds to wait (for time triggers)
   - `page_load`: Inject immediately before agent starts
-  - `event`: (Future) Event-based activation
-- `delay`: Seconds to wait (for time triggers)
+  - `event`: (TODO) Event-based activation
 
 **Injections:**
 - `type`: Currently only `script` is supported
@@ -362,25 +358,14 @@ def main():
         },
     ]
 
-    sent_count = 0
     for email in emails:
         print(f"Sending: {email['subject']}")
         result = send_email_with_result(**email)
 
         if result.returncode == 0:
-            sent_count += 1
             print("  ✓ Sent")
         else:
             print(f"  ✗ Failed: {result.stderr}")
-
-    print(f"\n✅ Sent {sent_count}/{len(emails)} emails")
-
-    # Verify emails arrived
-    count = check_inbox("alice@snappymail.zoo", "alice123")
-    if count:
-        print(f"✅ Verified {count} email(s) in inbox")
-
-    sys.exit(0 if sent_count > 0 else 1)
 
 if __name__ == "__main__":
     main()
