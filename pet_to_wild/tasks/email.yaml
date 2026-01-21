@@ -22,7 +22,7 @@ tasks:
   eval:
     types:
       - custom_function
-    custom_function: "zoo_eval.custom_evaluators.check_inbox_loaded"
+    custom_function: "pet_to_wild.tasks.custom_evaluators.check_inbox_loaded"
 
 tasks:
 - id: 102

@@ -113,108 +113,17 @@ class SceneManager:
     async def _execute_injections(self, scene: Scene):
         """Execute all injections for a scene."""
         for injection in scene.injections:
-            if injection.injection_type == "email":
-                await self._inject_email(injection)
-            elif injection.injection_type == "script":
+            if injection.injection_type == "script":
                 await self._inject_script(injection)
-
-    async def _inject_email(self, injection: InjectionPayload):
-        """
-        Inject an email using the zoo CLI.
-
-        Args:
-            injection: Email injection specification
-        """
-        if "@" not in injection.location:
-            raise ValueError(
-                f"Email injection location must include recipient email: {injection.location}"
-            )
-        recipient = injection.location.split(":")[0]
-        sender = injection.from_email
-
-        if not sender:
-            raise ValueError("Email injection `from_email` cannot be empty.")
-
-        # --- Get sender password ---
-        password = None
-        try:
-            # Extract domain from sender email to find the right credential file
-            domain = sender.split("@")[1]
-            creds_file = Path(f"credentials/{domain}.yaml")
-            if creds_file.exists():
-                with open(creds_file, "r") as f:
-                    creds = yaml.safe_load(f)
-                # Find user in credentials
-                for user_creds in creds.get("users", []):
-                    if user_creds.get("username") == sender:
-                        password = user_creds.get("password")
-                        break
-        except (IndexError, FileNotFoundError) as e:
-            self.injections_log.append({
-                "type": "email", "to": recipient, "error": f"Could not find credentials for {sender}: {e}", "success": False,
-            })
-            return
-
-        if not password:
-            self.injections_log.append({
-                "type": "email", "to": recipient, "error": f"Password not found for {sender} in credentials.", "success": False,
-            })
-            return
-        # --- End password lookup ---
-
-        zoo_cmd = get_zoo_cli_command()
-        cmd = [
-            *zoo_cmd,
-            "email", "send",
-            "--from", sender,
-            "--to", recipient,
-            "--subject", injection.subject,
-            "--body", injection.body or injection.content,
-            "--password", password,
-        ]
-
-        try:
-            # Build env for subprocess
-            env = os.environ.copy()
-            env["COMPOSE_PROJECT_NAME"] = get_default_project()
-            if self.zoo.config and self.zoo.config.zoo_cli_path:
-                env["ZOO_CLI_PATH"] = self.zoo.config.zoo_cli_path
-                env["ZOO_DEV"] = "1"
-
-            # Use asyncio.create_subprocess_exec for non-blocking call
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-            )
-            stdout, stderr = await process.communicate()
-
-            if process.returncode == 0:
-                self.injections_log.append({
-                    "type": "email", "to": recipient, "from": sender,
-                    "subject": injection.subject, "success": True,
-                })
-            else:
-                error_message = stderr.decode().strip() if stderr else "Unknown CLI error"
-                self.injections_log.append({
-                    "type": "email", "to": recipient, "error": error_message, "success": False,
-                })
-
-        except Exception as e:
-            self.injections_log.append({
-                "type": "email", "to": recipient, "error": str(e), "success": False,
-            })
 
     async def _inject_script(self, injection: InjectionPayload):
         """
         Execute a Python script injection.
 
         Args:
-            injection: Script injection specification (expects script_path in location or as attribute)
+            injection: Script injection specification
         """
-        # Get script path from injection (could be in location or script_path attribute)
-        script_path = getattr(injection, 'script_path', injection.location)
+        script_path = injection.script_path
 
         if not script_path:
             self.injections_log.append({

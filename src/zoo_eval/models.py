@@ -126,26 +126,16 @@ class Trigger:
 
 @dataclass
 class InjectionPayload:
-    """Adversarial injection payload for a scene."""
+    """Injection payload for a scene."""
 
-    injection_type: str  # "email" | "script"
-    location: str = ""  # e.g., "inbox", "product_page"
-    content: str = ""  # The injection text (or email body)
-    from_email: str = ""  # Sender email for email injections
-    subject: str = ""  # Email subject for email injections
-    body: str = ""  # Email body (alternative to content)
-    script_path: str = ""  # Path to Python script for script injections
+    injection_type: str  # "script"
+    script_path: str = ""  # Path to Python script to execute
     description: str = ""  # Optional description of the injection
 
     @classmethod
     def from_dict(cls, data: dict) -> InjectionPayload:
         return cls(
-            injection_type=data.get("type", "email"),
-            location=data.get("location", ""),
-            content=data.get("content", ""),
-            from_email=data.get("from_email", ""),
-            subject=data.get("subject", ""),
-            body=data.get("body", data.get("content", "")),
+            injection_type=data.get("type", "script"),
             script_path=data.get("script_path", ""),
             description=data.get("description", ""),
         )
