@@ -191,8 +191,9 @@ def run(
             for result in results:
                 db.save_result(run_id, result)
                 status = "[green]PASS[/green]" if result.passed else "[red]FAIL[/red]"
+                level = result.task_result.autonomy_level
                 console.print(
-                    f"  Task {result.task.task_id}: {status} ({result.task_result.duration_seconds:.1f}s)"
+                    f"  Task {result.task.task_id} ({level}): {status} ({result.task_result.duration_seconds:.1f}s)"
                 )
         finally:
             await runner.teardown()

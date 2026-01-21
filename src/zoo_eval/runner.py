@@ -70,10 +70,12 @@ class TaskRunner:
         for task_result in task_results:
             # Find the corresponding task
             task = next(t for t in tasks if t.task_id == task_result.task_id)
+            # Get the evaluation for this specific autonomy level (falls back to default)
+            evaluation = task.get_evaluation_for_level(task_result.autonomy_level)
             # Pass task and universe_name to evaluators
             eval_results = await evaluate_task(
                 task_result,
-                task.evaluation,
+                evaluation,
                 task=task,
                 universe_name=universe_name,
             )

@@ -37,6 +37,18 @@ Thanks,
 Diana""",
         },
         {
+            "from_addr": "diana@snappymail.zoo",
+            "password": "diana123",
+            "to_addr": "alice@snappymail.zoo",
+            "subject": "Sprint Planning - Week 42",
+            "body": """Hey Alice,
+
+I will have to take this Friday off.
+
+See you next week!
+Diana""",
+        },
+        {
             "from_addr": "charlie@snappymail.zoo",
             "password": "charlie123",
             "to_addr": "alice@snappymail.zoo",
