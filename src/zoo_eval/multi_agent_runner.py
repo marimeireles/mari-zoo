@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from pathlib import Path
 from typing import Any
 
-from .auth import get_login_hint
-from .models import AgentConfig, AgentResult, RunConfig, Task, TaskResult
+from .models import AgentResult, RunConfig, Task, TaskAgentConfig, TaskResult
 from .scenes import SceneManager
 from .zoo import Zoo
 
@@ -16,9 +16,10 @@ from .zoo import Zoo
 class MultiAgentRunner:
     """Runs tasks with multiple concurrent agents."""
 
-    def __init__(self, zoo: Zoo, config: RunConfig | None = None):
+    def __init__(self, zoo: Zoo, config: RunConfig | None = None, universe_path: Path | None = None):
         self.zoo = zoo
         self.config = config or RunConfig()
+        self.universe_path = universe_path
         self._llm = None
 
     async def setup(self):
@@ -68,7 +69,7 @@ class MultiAgentRunner:
         )
 
     async def _run_single_agent(
-        self, agent_config: AgentConfig, task: Task, start_url: str, autonomy_level: str = "L1"
+        self, agent_config: TaskAgentConfig, task: Task, start_url: str, autonomy_level: str = "L1"
     ) -> AgentResult:
         """Run a single agent and return its result."""
         from browser_use import Agent
@@ -80,12 +81,15 @@ class MultiAgentRunner:
             # Create fresh browser for this agent
             browser = await self._create_browser()
 
-            # Build agent-specific task
-            login_hint = get_login_hint(task.sites) if task.require_login else ""
-            # Use autonomy level if available, otherwise fall back to intent
-            task_instruction = task.autonomy_levels.get(autonomy_level, task.intent) if task.autonomy_levels else task.intent
+            # Build login hint from agent's credentials
+            login_hint = ""
+            if agent_config.require_login and agent_config.username and agent_config.password:
+                login_hint = f"Login with username '{agent_config.username}' and password '{agent_config.password}'. "
+
+            # Use autonomy level if available, otherwise fall back to task intent
+            task_instruction = agent_config.autonomy_levels.get(autonomy_level, task.intent)
             full_task = (
-                f"You are {agent_config.name}, {agent_config.persona}. "
+                f"You are {agent_config.name}. "
                 f"Go to {start_url}. {login_hint}{task_instruction}"
             )
 
@@ -131,7 +135,7 @@ class MultiAgentRunner:
             except asyncio.TimeoutError:
                 return AgentResult(
                     agent_name=agent_config.name,
-                    agent_role=agent_config.role,
+                    agent_role="",
                     success=False,
                     error=f"Timeout after {self.config.timeout_seconds}s",
                     duration_seconds=time.time() - start_time,
@@ -157,7 +161,7 @@ class MultiAgentRunner:
 
             return AgentResult(
                 agent_name=agent_config.name,
-                agent_role=agent_config.role,
+                agent_role="",
                 success=True,
                 answer=agent_answer,
                 final_url=final_url,
@@ -170,7 +174,7 @@ class MultiAgentRunner:
         except Exception as e:
             return AgentResult(
                 agent_name=agent_config.name,
-                agent_role=agent_config.role,
+                agent_role="",
                 success=False,
                 error=str(e),
                 duration_seconds=time.time() - start_time,
@@ -185,7 +189,7 @@ class MultiAgentRunner:
                     pass
 
     async def _run_shared_browser_task(
-        self, agents: list[AgentConfig], task: Task, start_url: str, autonomy_level: str = "L1"
+        self, agents: list[TaskAgentConfig], task: Task, start_url: str, autonomy_level: str = "L1"
     ) -> TaskResult:
         """Run multi-agent task with shared browser and memory."""
         from browser_use import Agent
@@ -203,12 +207,15 @@ class MultiAgentRunner:
                 start_time = time.time()
 
                 try:
-                    # Build agent-specific task
-                    login_hint = get_login_hint(task.sites) if task.require_login else ""
-                    # Use autonomy level if available, otherwise fall back to intent
-                    task_instruction = task.autonomy_levels.get(autonomy_level, task.intent) if task.autonomy_levels else task.intent
+                    # Build login hint from agent's credentials
+                    login_hint = ""
+                    if agent_config.require_login and agent_config.username and agent_config.password:
+                        login_hint = f"Login with username '{agent_config.username}' and password '{agent_config.password}'. "
+
+                    # Use autonomy level if available, otherwise fall back to task intent
+                    task_instruction = agent_config.autonomy_levels.get(autonomy_level, task.intent)
                     full_task = (
-                        f"You are {agent_config.name}, {agent_config.persona}. "
+                        f"You are {agent_config.name}. "
                         f"Go to {start_url}. {login_hint}{task_instruction}"
                     )
 
@@ -241,7 +248,7 @@ class MultiAgentRunner:
                             page = await browser.get_current_page()
                             if page:
                                 last_page_html['url'] = page.url
-                        except Exception as e:
+                        except Exception:
                             # Silently fail - we'll still have previous capture or None
                             pass
 
@@ -255,7 +262,7 @@ class MultiAgentRunner:
                         agent_results.append(
                             AgentResult(
                                 agent_name=agent_config.name,
-                                agent_role=agent_config.role,
+                                agent_role="",
                                 success=False,
                                 error=f"Timeout after {self.config.timeout_seconds}s",
                                 duration_seconds=time.time() - start_time,
@@ -279,11 +286,10 @@ class MultiAgentRunner:
                                     else str(fr)
                                 )
 
-
                     agent_results.append(
                         AgentResult(
                             agent_name=agent_config.name,
-                            agent_role=agent_config.role,
+                            agent_role="",
                             success=True,
                             answer=agent_answer,
                             final_url=final_url,
@@ -298,7 +304,7 @@ class MultiAgentRunner:
                     agent_results.append(
                         AgentResult(
                             agent_name=agent_config.name,
-                            agent_role=agent_config.role,
+                            agent_role="",
                             success=False,
                             error=str(e),
                             duration_seconds=time.time() - start_time,
@@ -333,48 +339,10 @@ class MultiAgentRunner:
                 except Exception:
                     pass
 
-    def _assign_tasks_to_agents(
-        self, agents: list[AgentConfig], tasks: list[Task]
-    ) -> dict[str, list[Task]]:
-        """Assign tasks to agents by name."""
-        import sys
-
-        assignment = {agent.name: [] for agent in agents}
-
-        if not tasks:
-            return assignment
-
-        for task in tasks:
-            if not task.agent:
-                print(
-                    f"Error: Task {task.task_id} has no 'agent' field. "
-                    f"Each task must specify which agent runs it.",
-                    file=sys.stderr,
-                )
-                continue
-
-            # Find matching agent (case-insensitive)
-            matched = None
-            for agent in agents:
-                if agent.name.lower() == task.agent.lower():
-                    matched = agent.name
-                    break
-
-            if matched:
-                assignment[matched].append(task)
-            else:
-                print(
-                    f"Error: Task {task.task_id} assigned to unknown agent '{task.agent}'. "
-                    f"Available: {', '.join(a.name for a in agents)}",
-                    file=sys.stderr,
-                )
-
-        return assignment
-
     async def run_multi_agent_tasks(
-        self, agents: list[AgentConfig], tasks: list[Task]
+        self, tasks: list[Task]
     ) -> list[TaskResult]:
-        """Run multiple tasks distributed across agents."""
+        """Run tasks with their defined agents."""
         # Restart Zoo for clean state
         self.zoo.restart()
         # Wait for Zoo to be ready
@@ -383,98 +351,71 @@ class MultiAgentRunner:
                 break
             time.sleep(1)
 
-        # Assign tasks to agents
-        assignment = self._assign_tasks_to_agents(agents, tasks)
-
         # Reset if any task requires it
         if any(t.require_reset for t in tasks):
             self.zoo.reset_databases()
 
         all_results = []
 
-        if self.config.shared_browser:
-            # Shared browser: run agents sequentially
-            for agent in agents:
-                agent_tasks = assignment[agent.name]
-                if not agent_tasks:
-                    continue  # Skip idle agents
+        for task in tasks:
+            if not task.agents:
+                print(f"Warning: Task {task.task_id} has no agents defined, skipping.")
+                continue
 
-                for task in agent_tasks:
-                    start_url = self.zoo.resolve_url(task.start_url)
-                    task_start_time = time.time()
+            start_url = self.zoo.resolve_url(task.start_url)
+            task_start_time = time.time()
 
-                    # Activate scene once per task (before autonomy level loop)
-                    scene_manager = None
-                    if task.scene_name:
-                        scene_manager = SceneManager(self.zoo)
-                        await scene_manager.load_and_activate_scene(task.scene_name, task_start_time)
+            # Activate scene once per task (before autonomy level loop)
+            scene_manager = None
+            if task.scene_name:
+                scene_manager = SceneManager(self.zoo, self.universe_path)
+                await scene_manager.load_and_activate_scene(task.scene_name, task_start_time)
 
+            try:
+                # Get agents list from task
+                agents = list(task.agents.values())
+
+                # Run each task with all autonomy levels
+                for autonomy_level in ["L0", "L1", "L2"]:
+                    if self.config.shared_browser:
+                        # Shared browser: run agents sequentially in same browser
+                        result = await self._run_shared_browser_task(agents, task, start_url, autonomy_level)
+                        all_results.append(result)
+                    else:
+                        # Separate browsers: run each agent in its own browser concurrently
+                        async def run_single_agent_task(agent_config: TaskAgentConfig) -> AgentResult:
+                            return await self._run_single_agent(agent_config, task, start_url, autonomy_level)
+
+                        agent_results = await asyncio.gather(
+                            *[run_single_agent_task(agent) for agent in agents]
+                        )
+
+                        # Aggregate into TaskResult
+                        all_succeeded = all(r.success for r in agent_results)
+                        combined_answer = "\n\n".join(
+                            f"[{r.agent_name}]: {r.answer}" for r in agent_results if r.answer
+                        )
+                        total_steps = sum(r.steps for r in agent_results)
+                        total_duration = sum(r.duration_seconds for r in agent_results)
+                        last_raw_result = agent_results[-1].raw_result if agent_results else None
+
+                        task_result = TaskResult(
+                            task_id=task.task_id,
+                            success=all_succeeded,
+                            agent_results=list(agent_results),
+                            agent_answer=combined_answer if combined_answer else None,
+                            steps=total_steps,
+                            duration_seconds=total_duration,
+                            raw_result=last_raw_result,
+                            autonomy_level=autonomy_level,
+                        )
+                        all_results.append(task_result)
+            finally:
+                # Clean up scene manager after all autonomy levels are done
+                if scene_manager:
                     try:
-                        # Run each task with all autonomy levels
-                        for autonomy_level in ["L0", "L1", "L2"]:
-                            result = await self._run_shared_browser_task([agent], task, start_url, autonomy_level)
-                            all_results.append(result)
-                    finally:
-                        # Clean up scene manager after all autonomy levels are done
-                        if scene_manager:
-                            try:
-                                await scene_manager.cleanup()
-                            except Exception:
-                                pass
-        else:
-            # Separate browsers: run all agents concurrently
-            async def run_agent_tasks(agent: AgentConfig) -> list[TaskResult]:
-                """Run all tasks assigned to this agent."""
-                agent_tasks = assignment[agent.name]
-                results = []
-
-                for task in agent_tasks:
-                    start_url = self.zoo.resolve_url(task.start_url)
-                    task_start_time = time.time()
-
-                    # Activate scene once per task (before autonomy level loop)
-                    scene_manager = None
-                    if task.scene_name:
-                        scene_manager = SceneManager(self.zoo)
-                        await scene_manager.load_and_activate_scene(task.scene_name, task_start_time)
-
-                    try:
-                        # Run each task with all autonomy levels
-                        for autonomy_level in ["L0", "L1", "L2"]:
-                            agent_result = await self._run_single_agent(agent, task, start_url, autonomy_level)
-
-                            # Convert AgentResult to TaskResult
-                            task_result = TaskResult(
-                                task_id=task.task_id,
-                                success=agent_result.success,
-                                agent_results=[agent_result],
-                                agent_answer=agent_result.answer,
-                                final_url=agent_result.final_url,
-                                page_content=agent_result.page_content,
-                                error=agent_result.error,
-                                steps=agent_result.steps,
-                                duration_seconds=agent_result.duration_seconds,
-                                raw_result=agent_result.raw_result,  # Pass through raw result
-                                autonomy_level=autonomy_level,  # Track which level was used
-                            )
-                            results.append(task_result)
-                    finally:
-                        # Clean up scene manager after all autonomy levels are done
-                        if scene_manager:
-                            try:
-                                await scene_manager.cleanup()
-                            except Exception:
-                                pass
-
-                return results
-
-            # Run all agents concurrently
-            agent_results_lists = await asyncio.gather(
-                *[run_agent_tasks(agent) for agent in agents]
-            )
-
-            # Flatten results
-            for results_list in agent_results_lists:
-                all_results.extend(results_list)
+                        await scene_manager.cleanup()
+                    except Exception:
+                        pass
 
         return all_results

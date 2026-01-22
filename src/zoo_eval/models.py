@@ -211,6 +211,27 @@ class AgentConfig:
 
 
 @dataclass
+class TaskAgentConfig:
+    """Per-agent configuration within a task."""
+
+    name: str
+    require_login: bool = False
+    username: str | None = None
+    password: str | None = None
+    autonomy_levels: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, name: str, data: dict) -> TaskAgentConfig:
+        return cls(
+            name=name,
+            require_login=data.get("require_login", False),
+            username=data.get("username"),
+            password=data.get("password"),
+            autonomy_levels=data.get("autonomy_levels", {}),
+        )
+
+
+@dataclass
 class Universe:
     """A universe configuration defining active sites and agents."""
 
@@ -238,9 +259,8 @@ class Task:
     sites: list[str]
     intent: str
     start_url: str
-    agent: str | None = None  # Agent name to assign this task to (matches universe config)
+    agents: dict[str, TaskAgentConfig] = field(default_factory=dict)
     compatible_universes: list[str] = field(default_factory=list)
-    require_login: bool = False
     require_reset: bool = False
     storage_state: str | None = None
     evaluation: Evaluation = field(default_factory=lambda: Evaluation(eval_types=[]))
@@ -248,19 +268,15 @@ class Task:
     # Benchmark-specific fields
     complexity: TaskComplexity | None = None
     environment: Environment | None = None
-    autonomy_levels: dict[str, str] = field(default_factory=dict)  # L0, L1, L2
-    autonomy_evaluations: dict[str, Evaluation] = field(default_factory=dict)  # Per-level evals
     scene_name: str | None = None  # References scene file by name
-    # Task-specific credentials (overrides default credentials from file)
-    username: str | None = None
-    password: str | None = None
 
     def get_evaluation_for_level(self, autonomy_level: str) -> Evaluation:
         """Get the evaluation criteria for a specific autonomy level.
 
         Falls back to the default evaluation if no level-specific evaluation exists.
         """
-        return self.autonomy_evaluations.get(autonomy_level, self.evaluation)
+        # TODO: Support per-agent per-level evaluations if needed
+        return self.evaluation
 
     @classmethod
     def from_dict(cls, data: dict) -> Task:
@@ -276,31 +292,26 @@ class Task:
         if data.get("environment"):
             environment = Environment(data["environment"])
 
-        # Parse per-autonomy-level evaluations if present
-        autonomy_evaluations = {}
-        if data.get("autonomy_evaluations"):
-            for level, eval_data in data["autonomy_evaluations"].items():
-                autonomy_evaluations[level] = Evaluation.from_dict(eval_data)
+        # Parse agents dict
+        agents = {}
+        if data.get("agents"):
+            for agent_name, agent_data in data["agents"].items():
+                agents[agent_name] = TaskAgentConfig.from_dict(agent_name, agent_data)
 
         return cls(
             task_id=task_id,
             sites=data.get("sites", []),
             intent=data["intent"],
             start_url=data.get("start_url", ""),
-            agent=data.get("agent"),
+            agents=agents,
             compatible_universes=data.get("compatible_universes", []),
-            require_login=data.get("require_login", False),
             require_reset=data.get("require_reset", False),
             storage_state=data.get("storage_state"),
             evaluation=Evaluation.from_dict(data.get("eval", {})),
             instantiation_dict=data.get("instantiation_dict", {}),
             complexity=complexity,
             environment=environment,
-            autonomy_levels=data.get("autonomy_levels", {}),
-            autonomy_evaluations=autonomy_evaluations,
             scene_name=data.get("scene"),
-            username=data.get("username"),
-            password=data.get("password"),
         )
 
 

@@ -1,0 +1,11 @@
+name: email_injection
+description: "Prompt injection via email"
+
+triggers:
+  - type: time
+    delay: 5
+
+injections:
+  - type: script
+    script_path: "scripts/seed_simple_email_inject.py"
+    description: "Sends adversarial email with prompt injection"

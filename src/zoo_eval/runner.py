@@ -6,11 +6,11 @@ import asyncio
 import os
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
-from .auth import get_login_hint
 from .evaluators import EvalResult, evaluate_task
-from .models import AgentConfig, RunConfig, Task, TaskResult
+from .models import RunConfig, Task, TaskResult
 from .multi_agent_runner import MultiAgentRunner
 from .zoo import Zoo
 
@@ -33,18 +33,18 @@ class TaskRunner:
     """Runs tasks using browser_use agent."""
 
     def __init__(
-        self, zoo: Zoo, agents: list[AgentConfig], config: RunConfig | None = None
+        self, zoo: Zoo, config: RunConfig | None = None, universe_path: Path | None = None
     ):
         self.zoo = zoo
-        self.agents = agents
         self.config = config or RunConfig()
+        self.universe_path = universe_path
         self._multi_agent_runner = None
 
     async def setup(self):
         """Initialize browser_use components."""
         os.environ["ANONYMIZED_TELEMETRY"] = "false"
         # Create multi-agent runner
-        self._multi_agent_runner = MultiAgentRunner(self.zoo, self.config)
+        self._multi_agent_runner = MultiAgentRunner(self.zoo, self.config, self.universe_path)
         await self._multi_agent_runner.setup()
 
     async def teardown(self):
@@ -60,10 +60,8 @@ class TaskRunner:
             tasks: Tasks to run
             universe_name: Name of the universe (for human review file organization)
         """
-        # Run all tasks with agent assignment
-        task_results = await self._multi_agent_runner.run_multi_agent_tasks(
-            self.agents, tasks
-        )
+        # Run all tasks
+        task_results = await self._multi_agent_runner.run_multi_agent_tasks(tasks)
 
         # Evaluate each result
         run_results = []

@@ -63,8 +63,7 @@ def list_tasks(
 
 @app.command()
 def run(
-    config: Path = typer.Argument(..., help="Path to tasks JSON file"),
-    universe: Path = typer.Option(..., "--universe", "-u", help="Path to universe YAML file"),
+    universe: Path = typer.Argument(..., help="Path to universe directory (contains config.yaml, tasks/, scenes/)"),
     task_ids: str = typer.Option(None, "--tasks", "-t", help="Comma-separated task IDs"),
     limit: int = typer.Option(None, "--limit", "-n", help="Max tasks to run"),
     headless: bool = typer.Option(True, help="Run browser headlessly"),
@@ -77,12 +76,30 @@ def run(
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
     seed: Path = typer.Option(None, "--seed", help="Path to seed script to run before tasks"),
 ):
-    """Run evaluation tasks."""
-    # Load universe
-    universe_obj = load_universe(universe)
+    """Run evaluation tasks from a universe directory."""
+    # Resolve universe path
+    universe_path = Path(universe)
+    if not universe_path.exists():
+        # Try looking in pet_to_wild/universes/
+        universe_path = Path("pet_to_wild/universes") / universe
+    if not universe_path.exists():
+        console.print(f"[red]Universe not found: {universe}[/red]")
+        raise typer.Exit(1)
 
-    # Load tasks
-    tasks = load_tasks(config)
+    # Load universe config
+    universe_obj = load_universe(universe_path)
+
+    # Load all tasks from universe's tasks/ directory
+    tasks_dir = universe_path / "tasks"
+    if not tasks_dir.exists():
+        console.print(f"[red]No tasks directory found in {universe_path}[/red]")
+        raise typer.Exit(1)
+
+    tasks = []
+    for task_file in tasks_dir.glob("*.yaml"):
+        tasks.extend(load_tasks(task_file))
+    for task_file in tasks_dir.glob("*.yml"):
+        tasks.extend(load_tasks(task_file))
 
     # Validate task compatibility with universe
     incompatible = [
@@ -116,9 +133,13 @@ def run(
     # Run seed script if provided (after Zoo is verified running)
     if seed:
         import subprocess
-        console.print(f"[cyan]Running seed script: {seed}[/cyan]")
+        # Resolve seed path relative to universe directory if not absolute
+        seed_path = Path(seed)
+        if not seed_path.is_absolute():
+            seed_path = universe_path / seed_path
+        console.print(f"[cyan]Running seed script: {seed_path}[/cyan]")
         try:
-            result = subprocess.run(["python3", str(seed)], capture_output=True, text=True, timeout=300)
+            result = subprocess.run(["python3", str(seed_path)], capture_output=True, text=True, timeout=300)
             if result.stdout:
                 console.print(result.stdout)
             if result.stderr:
@@ -138,7 +159,7 @@ def run(
     db = ResultsDB(db_path)
 
     if resume:
-        run_id = db.get_latest_run(str(config))
+        run_id = db.get_latest_run(str(universe_path))
         if run_id:
             completed = db.get_completed_task_ids(run_id)
             original_count = len(tasks)
@@ -147,16 +168,16 @@ def run(
         else:
             console.print("[yellow]No previous run found, starting fresh[/yellow]")
             run_id = db.create_run(
-                config_path=str(config),
-                universe=str(universe),
+                config_path=str(universe_path),
+                universe=universe_obj.name,
                 seed_script=str(seed) if seed else None,
                 model=model,
                 tasks=task_ids or "all",
             )
     else:
         run_id = db.create_run(
-            config_path=str(config),
-            universe=str(universe),
+            config_path=str(universe_path),
+            universe=universe_obj.name,
             seed_script=str(seed) if seed else None,
             model=model,
             tasks=task_ids or "all",
@@ -177,15 +198,15 @@ def run(
         model=model,
         shared_browser=shared_browser,
     )
-    runner = TaskRunner(zoo, universe_obj.agents, run_config)
+    runner = TaskRunner(zoo, run_config, universe_path)
 
     async def execute():
         await runner.setup()
         try:
-            console.print(f"  Running {len(tasks)} task(s) across {len(universe_obj.agents)} agent(s)...")
+            console.print(f"  Running {len(tasks)} task(s)...")
 
             # Run all tasks with agent assignment
-            results = await runner.run_and_evaluate_batch(tasks)
+            results = await runner.run_and_evaluate_batch(tasks, universe_obj.name)
 
             # Save and display results
             for result in results:

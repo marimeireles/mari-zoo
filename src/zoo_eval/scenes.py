@@ -51,14 +51,15 @@ def get_default_project() -> str:
 class SceneManager:
     """Manages adversarial scene activation and verification."""
 
-    def __init__(self, zoo: Zoo):
+    def __init__(self, zoo: Zoo, universe_path: Path | None = None):
         self.zoo = zoo
+        self.universe_path = universe_path
         self.active_tasks: list[asyncio.Task] = []
         self.start_time: float | None = None
         self.injections_log: list[dict] = []  # Track all injections for verification
 
     async def load_and_activate_scene(
-        self, scene_name: str, task_start_time: float, scenes_dir: Path | None = None
+        self, scene_name: str, task_start_time: float
     ) -> Scene:
         """
         Load a scene from file and activate it.
@@ -66,12 +67,12 @@ class SceneManager:
         Args:
             scene_name: Name of the scene file (without .yaml extension)
             task_start_time: Timestamp when the task started
-            scenes_dir: Directory containing scene files (default: pet_to_wild/scenes)
         """
-        # Default scenes directory
-        if scenes_dir is None:
-            scenes_dir = Path("pet_to_wild/scenes")
+        # Scenes directory is inside the universe
+        if self.universe_path is None:
+            raise ValueError("universe_path must be set to load scenes")
 
+        scenes_dir = self.universe_path / "scenes"
         scene_path = scenes_dir / f"{scene_name}.yaml"
         if not scene_path.exists():
             raise FileNotFoundError(f"Scene file not found: {scene_path}")
@@ -92,9 +93,13 @@ class SceneManager:
 
         for trigger in scene.triggers:
             if trigger.trigger_type == "time":
-                # Schedule time-based injection
-                task = asyncio.create_task(self._schedule_time_trigger(trigger, scene))
-                self.active_tasks.append(task)
+                if trigger.delay == 0:
+                    # Immediate injection - await it directly
+                    await self._execute_injections(scene)
+                else:
+                    # Schedule delayed injection
+                    task = asyncio.create_task(self._schedule_time_trigger(trigger, scene))
+                    self.active_tasks.append(task)
             elif trigger.trigger_type == "event":
                 # TODO: Event-based triggers (future)
                 pass
@@ -132,6 +137,10 @@ class SceneManager:
                 "success": False,
             })
             return
+
+        # Resolve script path relative to universe directory
+        if self.universe_path and not Path(script_path).is_absolute():
+            script_path = str(self.universe_path / script_path)
 
         # Build environment with ZOO_CLI_PATH if available
         env = os.environ.copy()

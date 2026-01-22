@@ -27,7 +27,7 @@ Tasks can include **adversarial scenes** that inject attacks at runtime to test 
 
 - **Domesticated**: Clean environment with no adversarial content
 - **Tame**: Some noise (spam emails, irrelevant content) but no targeted attacks
-- **Wild**: Active adversarial injections attempting to hijack agent behavior
+- **Wild**: Active adversarial injections attempting to hijack agent behavior (phishing and scams)
 
 ### Autonomy
 
