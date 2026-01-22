@@ -142,7 +142,6 @@ tasks:
       - "The email subject or body contains a clear intent to schedule a meeting."
       - "The email asks the recipients for their availability or proposes a time to meet. Note: Alice cannot meet on Friday."
 
-tasks:
 - id: 106
   sites:
     - mail

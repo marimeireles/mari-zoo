@@ -317,18 +317,22 @@ class MultiAgentRunner:
                 f"[{r.agent_name}]: {r.answer}" for r in agent_results if r.answer
             )
             total_steps = sum(r.steps for r in agent_results)
-            # Use the last agent's raw_result for the TaskResult
+            # Use the last agent's raw_result, page_content, and final_url for the TaskResult
             last_raw_result = agent_results[-1].raw_result if agent_results else None
+            last_page_content = agent_results[-1].page_content if agent_results else None
+            last_final_url = agent_results[-1].final_url if agent_results else None
 
             return TaskResult(
                 task_id=task.task_id,
                 success=all_succeeded,
                 agent_results=agent_results,
                 agent_answer=combined_answer if combined_answer else None,
+                final_url=last_final_url,
+                page_content=last_page_content,
                 steps=total_steps,
                 duration_seconds=time.time() - overall_start,
-                raw_result=last_raw_result,  # Include raw result from last agent
-                autonomy_level=autonomy_level,  # Track which level was used
+                raw_result=last_raw_result,
+                autonomy_level=autonomy_level,
             )
 
         finally:
@@ -398,12 +402,17 @@ class MultiAgentRunner:
                         total_steps = sum(r.steps for r in agent_results)
                         total_duration = sum(r.duration_seconds for r in agent_results)
                         last_raw_result = agent_results[-1].raw_result if agent_results else None
+                        # Get page_content and final_url from last agent result
+                        last_page_content = agent_results[-1].page_content if agent_results else None
+                        last_final_url = agent_results[-1].final_url if agent_results else None
 
                         task_result = TaskResult(
                             task_id=task.task_id,
                             success=all_succeeded,
                             agent_results=list(agent_results),
                             agent_answer=combined_answer if combined_answer else None,
+                            final_url=last_final_url,
+                            page_content=last_page_content,
                             steps=total_steps,
                             duration_seconds=total_duration,
                             raw_result=last_raw_result,

@@ -226,8 +226,14 @@ class ResultsDB:
         self.conn.close()
 
 
-def print_report(db: ResultsDB, run_id: int):
-    """Print a summary report for a run."""
+def print_report(db: ResultsDB, run_id: int, detailed: bool = False):
+    """Print a summary report for a run.
+
+    Args:
+        db: Database connection
+        run_id: Run ID to report on
+        detailed: If True, show full evaluation reasoning for each task
+    """
     from rich.console import Console
     from rich.table import Table
 
@@ -310,11 +316,40 @@ def print_report(db: ResultsDB, run_id: int):
                                 else:
                                     reason = str(details)
                                 break
-                    # Truncate long reasons
-                    if len(reason) > 50:
-                        reason = reason[:47] + "..."
                     row_data.append(f"[red]{reason or 'FAIL'}[/red]")
 
             results_table.add_row(*row_data)
 
         console.print(results_table)
+
+        # Show detailed evaluation reasoning for each task/level (only with --detailed flag)
+        if detailed:
+            console.print(f"\n[bold]Detailed Evaluation Results:[/bold]")
+            for task_id in sorted(tasks_by_id.keys()):
+                levels = tasks_by_id[task_id]
+                for level in ["L0", "L1", "L2"]:
+                    if level not in levels:
+                        continue
+                    result = levels[level]
+                    passed = result["passed"]
+                    status_color = "green" if passed else "red"
+                    status_text = "PASS" if passed else "FAIL"
+
+                    console.print(f"\n[bold]Task {task_id} ({level}):[/bold] [{status_color}]{status_text}[/{status_color}]")
+
+                    # Show evaluation details
+                    if result.get("eval_results"):
+                        evals = json.loads(result["eval_results"])
+                        for e in evals:
+                            eval_status = "[green]✓[/green]" if e["passed"] else "[red]✗[/red]"
+                            eval_type = e.get("type", "unknown")
+                            details = e.get("details", "No details")
+                            if isinstance(details, dict):
+                                details = "; ".join(f"{k}: {v}" for k, v in details.items())
+                            console.print(f"  {eval_status} [{eval_type}] {details}")
+
+                    # Show error if present
+                    if result.get("error"):
+                        console.print(f"  [red]Error: {result['error']}[/red]")
+        else:
+            console.print(f"\n[dim]Use --detailed or -d to see full evaluation reasoning[/dim]")

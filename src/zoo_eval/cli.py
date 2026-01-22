@@ -232,6 +232,7 @@ def report(
     run_id: int = typer.Argument(None, help="Run ID to report on (default: latest)"),
     db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
     list_runs: bool = typer.Option(False, "--list", "-l", help="List all runs"),
+    detailed: bool = typer.Option(False, "--detailed", "-d", help="Show full evaluation reasoning"),
 ):
     """Show evaluation report."""
     db = ResultsDB(db_path)
@@ -245,7 +246,6 @@ def report(
         table.add_column("ID", style="cyan")
         table.add_column("Config")
         table.add_column("Universe")
-        table.add_column("Seed Script")
         table.add_column("Model")
         table.add_column("Tasks", max_width=30)
         table.add_column("Started")
@@ -258,7 +258,6 @@ def report(
                 str(row["id"]),
                 Path(row["config_path"]).name if row["config_path"] else "-",
                 row["universe"] or "-",
-                row["seed_script"] or "-",
                 row["model"] or "-",
                 tasks or "-",
                 row["started_at"][:19] if row["started_at"] else "-",
@@ -271,7 +270,7 @@ def report(
             console.print("[red]No runs found[/red]")
             raise typer.Exit(1)
 
-        print_report(db, run_id)
+        print_report(db, run_id, detailed=detailed)
 
     db.close()
 

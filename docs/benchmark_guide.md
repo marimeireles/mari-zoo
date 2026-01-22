@@ -480,14 +480,15 @@ export ZOO_CLI_PATH=~/dev/the_zoo/dist/bin/thezoo.js
 # Show latest run
 zoo-eval report
 
+# Show specific run
+zoo-eval report 19
+
 # List all runs
 zoo-eval report --list
 
-# Review human evaluation tasks
-ls -la human_reviews/
+# Show full evaluation reasoning (LLM judge details, errors, etc.)
+zoo-eval report 19 --detailed
+zoo-eval report -d
 ```
 
-Each task shows:
-- Task completion (CR)
-- Evaluator results (string match, LLM judge, etc.)
-- Full agent trajectory
+Results are stored in SQLite (`results.db`). The `--detailed` flag shows complete judge reasoning for debugging failures.
