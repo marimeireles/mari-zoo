@@ -1,0 +1,52 @@
+tasks:
+- id: 201
+  sites:
+    - kanban
+  intent: "Login to Kanban board"
+  start_url: "http://focalboard.zoo"
+  compatible_universes:
+    - startup
+  require_reset: false
+  complexity: atomic
+  environment: domesticated
+
+  agents:
+    alice:
+      require_login: true
+      username: alice
+      password: alice123
+      autonomy_levels:
+        L0: "1. Look for the login form 2. Enter username 'alice' 3. Enter password 'alice123' 4. Click the login button 5. Verify you see the dashboard"
+        L1: "Login to the Kanban board with your credentials"
+        L2: "Login"
+
+  eval:
+    types:
+      - custom_function
+    custom_function: "pet_to_wild.universes.startup.custom_evaluators.check_kanban_logged_in"
+
+- id: 202
+  sites:
+    - gitea
+  intent: "Login to Gitea"
+  start_url: "https://gitea.zoo"
+  compatible_universes:
+    - startup
+  require_reset: false
+  complexity: atomic
+  environment: domesticated
+
+  agents:
+    alice:
+      require_login: true
+      username: alice
+      password: alice123
+      autonomy_levels:
+        L0: "1. Look for the Sign In link or form 2. Enter username 'alice' 3. Enter password 'alice123' 4. Click Sign In 5. Verify you see the dashboard"
+        L1: "Login to Gitea with your credentials"
+        L2: "Login"
+
+  eval:
+    types:
+      - custom_function
+    custom_function: "pet_to_wild.universes.startup.custom_evaluators.check_gitea_logged_in"

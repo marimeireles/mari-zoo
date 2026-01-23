@@ -64,7 +64,7 @@ def list_tasks(
 @app.command()
 def run(
     universe: Path = typer.Argument(..., help="Path to universe directory (contains config.yaml, tasks/, scenes/)"),
-    task_ids: str = typer.Option(None, "--tasks", "-t", help="Comma-separated task IDs"),
+    task: list[str] = typer.Option(..., "--task", "-t", help="Task file name and optional ID: --task devtools or --task devtools 201"),
     limit: int = typer.Option(None, "--limit", "-n", help="Max tasks to run"),
     headless: bool = typer.Option(True, help="Run browser headlessly"),
     max_steps: int = typer.Option(30, help="Max steps per task"),
@@ -89,17 +89,27 @@ def run(
     # Load universe config
     universe_obj = load_universe(universe_path)
 
-    # Load all tasks from universe's tasks/ directory
+    # Parse --task argument: first element is filename, rest are optional task IDs
+    task_file_name = task[0]
+    task_ids = [int(t) for t in task[1:]] if len(task) > 1 else []
+
+    # Load tasks from specified file
     tasks_dir = universe_path / "tasks"
     if not tasks_dir.exists():
         console.print(f"[red]No tasks directory found in {universe_path}[/red]")
         raise typer.Exit(1)
 
-    tasks = []
-    for task_file in tasks_dir.glob("*.yaml"):
-        tasks.extend(load_tasks(task_file))
-    for task_file in tasks_dir.glob("*.yml"):
-        tasks.extend(load_tasks(task_file))
+    # Find the task file (try .yaml then .yml)
+    task_file_path = tasks_dir / f"{task_file_name}.yaml"
+    if not task_file_path.exists():
+        task_file_path = tasks_dir / f"{task_file_name}.yml"
+    if not task_file_path.exists():
+        console.print(f"[red]Task file not found: {task_file_name}.yaml[/red]")
+        available = [f.stem for f in tasks_dir.glob("*.yaml")] + [f.stem for f in tasks_dir.glob("*.yml")]
+        console.print(f"[yellow]Available task files: {', '.join(available)}[/yellow]")
+        raise typer.Exit(1)
+
+    tasks = load_tasks(task_file_path)
 
     # Validate task compatibility with universe
     incompatible = [
@@ -113,8 +123,7 @@ def run(
 
     # Filter by task IDs if specified
     if task_ids:
-        ids = {int(i.strip()) for i in task_ids.split(",")}
-        tasks = [t for t in tasks if t.task_id in ids]
+        tasks = [t for t in tasks if t.task_id in task_ids]
 
     if limit:
         tasks = tasks[:limit]
@@ -158,6 +167,11 @@ def run(
     # Set up results database
     db = ResultsDB(db_path)
 
+    # Format tasks info for storage
+    tasks_info = task_file_name
+    if task_ids:
+        tasks_info += f":{','.join(str(t) for t in task_ids)}"
+
     if resume:
         run_id = db.get_latest_run(str(universe_path))
         if run_id:
@@ -172,7 +186,7 @@ def run(
                 universe=universe_obj.name,
                 seed_script=str(seed) if seed else None,
                 model=model,
-                tasks=task_ids or "all",
+                tasks=tasks_info,
             )
     else:
         run_id = db.create_run(
@@ -180,7 +194,7 @@ def run(
             universe=universe_obj.name,
             seed_script=str(seed) if seed else None,
             model=model,
-            tasks=task_ids or "all",
+            tasks=tasks_info,
         )
 
     if not tasks:

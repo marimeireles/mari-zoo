@@ -29,5 +29,6 @@ Example:
 """
 
 from .email_checker import check_inbox_loaded
+from .devtools_checker import check_kanban_logged_in, check_gitea_logged_in
 
-__all__ = ["check_inbox_loaded"]
+__all__ = ["check_inbox_loaded", "check_kanban_logged_in", "check_gitea_logged_in"]

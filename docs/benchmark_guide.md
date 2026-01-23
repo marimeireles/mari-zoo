@@ -411,20 +411,23 @@ environment: wild       # Typically used with wild environment
 ### Basic Usage
 
 ```bash
-# Run all tasks in a file
-zoo-eval run pet_to_wild/tasks/email.yaml \
-  --universe startup
+# Run all tasks from a task file
+zoo-eval run startup --task email
 
-# Run specific task
-zoo-eval run pet_to_wild/tasks/email.yaml \
-  --universe startup \
-  --tasks 102
+# Run specific task by ID
+zoo-eval run startup --task email 101
+
+# Run multiple tasks
+zoo-eval run startup --task devtools 201 202
 
 # Watch in browser (non-headless)
-zoo-eval run pet_to_wild/tasks/email.yaml \
-  --universe startup \
-  --no-headless
+zoo-eval run startup --task email 101 --no-headless
+
+# Use a specific model
+zoo-eval run startup --task email --model gpt-5
 ```
+
+The `--task` flag is required and takes the task file name (without .yaml) followed by optional task IDs.
 
 ### Environment Setup
 
