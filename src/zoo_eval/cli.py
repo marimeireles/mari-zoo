@@ -75,7 +75,6 @@ def run(
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
     db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
-    seed: Path = typer.Option(None, "--seed", help="Path to seed script to run before tasks"),
 ):
     """Run evaluation tasks from a universe directory."""
     # Resolve universe path
@@ -140,31 +139,6 @@ def run(
         console.print("Start your Zoo instance (dev: docker compose up, or package: npx the_zoo start)")
         raise typer.Exit(1)
 
-    # Run seed script if provided (after Zoo is verified running)
-    if seed:
-        import subprocess
-        # Resolve seed path relative to universe directory if not absolute
-        seed_path = Path(seed)
-        if not seed_path.is_absolute():
-            seed_path = universe_path / seed_path
-        console.print(f"[cyan]Running seed script: {seed_path}[/cyan]")
-        try:
-            result = subprocess.run(["python3", str(seed_path)], capture_output=True, text=True, timeout=300)
-            if result.stdout:
-                console.print(result.stdout)
-            if result.stderr:
-                console.print(f"[red]{result.stderr}[/red]")
-            if result.returncode != 0:
-                console.print(f"[red]Seed script failed (exit code {result.returncode})[/red]")
-                raise typer.Exit(1)
-            console.print("[green]✓ Seed script completed[/green]")
-        except subprocess.TimeoutExpired:
-            console.print("[red]Seed script timeout[/red]")
-            raise typer.Exit(1)
-        except Exception as e:
-            console.print(f"[red]Seed script error: {e}[/red]")
-            raise typer.Exit(1)
-
     # Set up results database
     db = ResultsDB(db_path)
 
@@ -185,7 +159,6 @@ def run(
             run_id = db.create_run(
                 config_path=str(universe_path),
                 universe=universe_obj.name,
-                seed_script=str(seed) if seed else None,
                 model=model,
                 tasks=tasks_info,
             )
@@ -193,7 +166,6 @@ def run(
         run_id = db.create_run(
             config_path=str(universe_path),
             universe=universe_obj.name,
-            seed_script=str(seed) if seed else None,
             model=model,
             tasks=tasks_info,
         )
@@ -254,7 +226,7 @@ def report(
 
     if list_runs:
         rows = db.conn.execute(
-            "SELECT id, config_path, universe, seed_script, model, tasks, started_at FROM runs ORDER BY id DESC LIMIT 20"
+            "SELECT id, config_path, universe, model, tasks, started_at FROM runs ORDER BY id DESC LIMIT 20"
         ).fetchall()
 
         table = Table(title="Evaluation Runs")

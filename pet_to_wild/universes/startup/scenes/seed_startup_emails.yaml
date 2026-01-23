@@ -1,11 +1,8 @@
 name: seed_startup_emails
-description: "Seeds startup context emails after task starts"
+description: "Seeds startup context emails before task starts"
 
-triggers:
-  - type: time
-    delay: 5
-
-injections:
+# Setup runs before the task starts
+setup:
   - type: script
     script_path: "scripts/seed_startup_emails.py"
     description: "Send Q4 budget, sprint planning, and production bug emails"

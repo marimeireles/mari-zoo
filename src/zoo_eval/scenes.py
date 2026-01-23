@@ -1,4 +1,4 @@
-"""Scene management for adversarial benchmark scenarios."""
+"""Scene management for benchmark scenarios."""
 
 from __future__ import annotations
 
@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING
 import yaml
 
 from .helpers import get_zoo_cli_command
-from .models import Scene, Trigger, InjectionPayload, load_scene
+from .models import Scene, Trigger, ActionPayload, load_scene
+from .matomo import get_matomo_client
 
 if TYPE_CHECKING:
     from .zoo import Zoo
@@ -49,14 +50,14 @@ def get_default_project() -> str:
 
 
 class SceneManager:
-    """Manages adversarial scene activation and verification."""
+    """Manages scene activation and verification."""
 
     def __init__(self, zoo: Zoo, universe_path: Path | None = None):
         self.zoo = zoo
         self.universe_path = universe_path
         self.active_tasks: list[asyncio.Task] = []
         self.start_time: float | None = None
-        self.injections_log: list[dict] = []  # Track all injections for verification
+        self.actions_log: list[dict] = []  # Track all actions for verification
 
     async def load_and_activate_scene(
         self, scene_name: str, task_start_time: float
@@ -78,8 +79,21 @@ class SceneManager:
             raise FileNotFoundError(f"Scene file not found: {scene_path}")
 
         scene = load_scene(scene_path)
+
+        # Run setup actions first (before task starts)
+        await self._run_actions(scene.setup, "setup script")
+
+        # Then activate triggers for runtime actions
         await self.activate_scene(scene, task_start_time)
         return scene
+
+    async def _run_actions(self, actions: list[ActionPayload], label: str = ""):
+        """Run a list of actions."""
+        for action in actions:
+            if action.action_type == "script":
+                if label:
+                    print(f"Running {label}: {action.script_path}")
+                await self._run_script(action)
 
     async def activate_scene(self, scene: Scene, task_start_time: float):
         """
@@ -94,44 +108,82 @@ class SceneManager:
         for trigger in scene.triggers:
             if trigger.trigger_type == "time":
                 if trigger.delay == 0:
-                    # Immediate injection - await it directly
-                    await self._execute_injections(scene)
+                    # Immediate action - await it directly
+                    await self._run_actions(scene.actions)
                 else:
-                    # Schedule delayed injection
+                    # Schedule delayed action
                     task = asyncio.create_task(self._schedule_time_trigger(trigger, scene))
                     self.active_tasks.append(task)
             elif trigger.trigger_type == "event":
-                # TODO: Event-based triggers (future)
-                pass
+                # Poll Matomo for matching event
+                task = asyncio.create_task(self._schedule_event_trigger(trigger, scene))
+                self.active_tasks.append(task)
             elif trigger.trigger_type == "page_load":
-                # Inject immediately (before agent navigates)
-                await self._execute_injections(scene)
+                # Run immediately (before agent navigates)
+                await self._run_actions(scene.actions)
 
     async def _schedule_time_trigger(self, trigger: Trigger, scene: Scene):
-        """Wait for delay, then execute injections."""
+        """Wait for delay, then execute actions."""
         if trigger.delay is None:
             return
 
         await asyncio.sleep(trigger.delay)
-        await self._execute_injections(scene)
+        await self._run_actions(scene.actions)
 
-    async def _execute_injections(self, scene: Scene):
-        """Execute all injections for a scene."""
-        for injection in scene.injections:
-            if injection.injection_type == "script":
-                await self._inject_script(injection)
+    async def _schedule_event_trigger(
+        self,
+        trigger: Trigger,
+        scene: Scene,
+        poll_interval: float = 3.0,
+        timeout: float = 600.0,
+    ):
+        """Poll Matomo for matching event, then execute actions.
 
-    async def _inject_script(self, injection: InjectionPayload):
-        """
-        Execute a Python script injection.
+        We poll Matomo repeatedly because it doesn't support push notifications.
+        The browser tracks events via shared.js and sends them to Matomo, then
+        we query Matomo's API to detect when the event occurred.
 
         Args:
-            injection: Script injection specification
+            trigger: Event trigger with site, event_category, event_match
+            scene: Scene to activate when event found
+            poll_interval: Seconds between Matomo queries (default 3s)
+            timeout: Max seconds to wait for event (default 10 min)
         """
-        script_path = injection.script_path
+        if not trigger.site or not trigger.event_match:
+            print(f"Event trigger missing required fields: site={trigger.site}, event_match={trigger.event_match}")
+            return
+
+        matomo = get_matomo_client()
+        elapsed = 0.0
+
+        while elapsed < timeout:
+            event = matomo.find_event(
+                site=trigger.site,
+                category=trigger.event_category,
+                name_contains=trigger.event_match,
+            )
+
+            if event:
+                print(f"Event trigger matched: {event.category}/{event.name}")
+                await self._run_actions(scene.actions)
+                return
+
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+
+        print(f"Event trigger timeout: no match for {trigger.event_category}/{trigger.event_match} on {trigger.site}")
+
+    async def _run_script(self, action: ActionPayload):
+        """
+        Execute a Python script action.
+
+        Args:
+            action: Script action specification
+        """
+        script_path = action.script_path
 
         if not script_path:
-            self.injections_log.append({
+            self.actions_log.append({
                 "type": "script",
                 "error": "No script_path specified",
                 "success": False,
@@ -157,28 +209,28 @@ class SceneManager:
             )
 
             if result.returncode == 0:
-                self.injections_log.append({
+                self.actions_log.append({
                     "type": "script",
                     "script": script_path,
                     "success": True,
                     "output": result.stdout[:500] if result.stdout else None,  # Truncate long output
                 })
             else:
-                self.injections_log.append({
+                self.actions_log.append({
                     "type": "script",
                     "script": script_path,
                     "error": result.stderr[:500] if result.stderr else "Unknown error",
                     "success": False,
                 })
         except subprocess.TimeoutExpired:
-            self.injections_log.append({
+            self.actions_log.append({
                 "type": "script",
                 "script": script_path,
                 "error": "Timeout (>60s)",
                 "success": False,
             })
         except Exception as e:
-            self.injections_log.append({
+            self.actions_log.append({
                 "type": "script",
                 "script": script_path,
                 "error": str(e),

@@ -33,7 +33,6 @@ class ResultsDB:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 config_path TEXT,
                 universe TEXT,
-                seed_script TEXT,
                 model TEXT,
                 tasks TEXT,
                 started_at TEXT,
@@ -68,14 +67,13 @@ class ResultsDB:
         self,
         config_path: str | None = None,
         universe: str | None = None,
-        seed_script: str | None = None,
         model: str | None = None,
         tasks: str | None = None,
     ) -> int:
         """Create a new evaluation run and return its ID."""
         cursor = self.conn.execute(
-            "INSERT INTO runs (config_path, universe, seed_script, model, tasks, started_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (config_path, universe, seed_script, model, tasks, datetime.now().isoformat()),
+            "INSERT INTO runs (config_path, universe, model, tasks, started_at) VALUES (?, ?, ?, ?, ?)",
+            (config_path, universe, model, tasks, datetime.now().isoformat()),
         )
         self.conn.commit()
         return cursor.lastrowid

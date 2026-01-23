@@ -10,8 +10,9 @@ Handles all environment setup automatically.
 
 import os
 import subprocess
+import requests
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Any
 
 
 @dataclass

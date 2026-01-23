@@ -1,0 +1,21 @@
+name: pr_feedback
+description: "Junior submits PR, senior reviews and requests changes"
+
+# Setup runs before the task starts (seeds environment)
+setup:
+  - type: script
+    script_path: "scripts/seed_junior_dev.py"
+    description: "Create Gitea repo with buggy code and issues"
+
+# Triggers run during task execution
+triggers:
+  - type: event
+    site: gitea.zoo
+    event_category: AJAX
+    event_match: "/pulls"  # Matches PR creation API call
+
+# Actions run when triggers fire (when PR is submitted)
+actions:
+  - type: script
+    script_path: "scripts/send_senior_pr_feedback.py"
+    description: "Senior sends email asking for input validation"

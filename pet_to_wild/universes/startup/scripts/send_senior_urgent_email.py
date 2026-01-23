@@ -8,9 +8,9 @@ def main():
     result = send_email_with_result(
         from_addr="bob@snappymail.zoo",
         password="bob123",
-        to_addr="alice@snappymail.zoo",
+        to_addr="charlie@snappymail.zoo",
         subject="URGENT: is_even bug breaking production",
-        body="""Hey Alice,
+        body="""Hey Charlie,
 
 We have a critical issue in production. The is_even() function in calculator-utils is returning wrong results - it says odd numbers are even and vice versa.
 

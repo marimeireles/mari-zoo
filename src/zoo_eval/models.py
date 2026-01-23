@@ -107,33 +107,54 @@ class DBQuery:
 
 @dataclass
 class Trigger:
-    """Trigger specification for when a scene activates."""
+    """Trigger specification for when a scene activates.
+
+    Trigger types:
+    - time: Activate after a delay (seconds)
+    - event: Activate when a Matomo event is detected
+    - page_load: Activate immediately before agent starts
+
+    Event trigger fields (for type="event"):
+    - site: Zoo site domain (e.g., 'gitea.zoo')
+    - event_category: Matomo event category (e.g., 'AJAX', 'Button', 'Form')
+    - event_match: Text to match in event name (case-insensitive)
+    """
 
     trigger_type: str  # "time" | "event" | "page_load"
     delay: int | None = None  # For time triggers: seconds after task starts
-    event_name: str | None = None  # For event triggers (future)
+    # Event trigger fields
+    site: str | None = None  # Zoo site domain
+    event_category: str | None = None  # Matomo event category
+    event_match: str | None = None  # Text to match in event name
 
     @classmethod
     def from_dict(cls, data: dict) -> Trigger:
         return cls(
             trigger_type=data.get("type", "time"),
             delay=data.get("delay"),
-            event_name=data.get("event_name"),
+            site=data.get("site"),
+            event_category=data.get("event_category"),
+            event_match=data.get("event_match"),
         )
 
 
 @dataclass
-class InjectionPayload:
-    """Injection payload for a scene."""
+class ActionPayload:
+    """Action that runs as part of a scene.
 
-    injection_type: str  # "script"
+    Actions are scripts or commands that execute during a scene. They can run:
+    - In setup: before the task starts (e.g., seeding a database, creating repos)
+    - On triggers: during task execution when conditions are met (e.g., sending an email)
+    """
+
+    action_type: str  # "script"
     script_path: str = ""  # Path to Python script to execute
-    description: str = ""  # Optional description of the injection
+    description: str = ""  # Optional description of the action
 
     @classmethod
-    def from_dict(cls, data: dict) -> InjectionPayload:
+    def from_dict(cls, data: dict) -> ActionPayload:
         return cls(
-            injection_type=data.get("type", "script"),
+            action_type=data.get("type", "script"),
             script_path=data.get("script_path", ""),
             description=data.get("description", ""),
         )
@@ -141,12 +162,19 @@ class InjectionPayload:
 
 @dataclass
 class Scene:
-    """Adversarial scene specification loaded from separate YAML files."""
+    """Scene specification loaded from YAML files.
+
+    Scenes define what happens before and during a task:
+    - setup: Actions that run before the task starts (seeding data)
+    - triggers: Conditions that activate actions during execution
+    - actions: What runs when triggers fire
+    """
 
     name: str
     description: str = ""
+    setup: list[ActionPayload] = field(default_factory=list)
     triggers: list[Trigger] = field(default_factory=list)
-    injections: list[InjectionPayload] = field(default_factory=list)
+    actions: list[ActionPayload] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict | None) -> Scene | None:
@@ -155,8 +183,9 @@ class Scene:
         return cls(
             name=data.get("name", ""),
             description=data.get("description", ""),
+            setup=[ActionPayload.from_dict(s) for s in data.get("setup", [])],
             triggers=[Trigger.from_dict(t) for t in data.get("triggers", [])],
-            injections=[InjectionPayload.from_dict(i) for i in data.get("injections", [])],
+            actions=[ActionPayload.from_dict(a) for a in data.get("actions", [])],
         )
 
 

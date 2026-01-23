@@ -1,11 +1,18 @@
 name: email_injection
-description: "Prompt injection via email"
+description: "Seeds legitimate emails, then injects adversarial prompt injection email"
 
+# Setup seeds legitimate emails before task starts
+setup:
+  - type: script
+    script_path: "scripts/seed_startup_emails.py"
+    description: "Send legitimate context emails first"
+
+# Adversarial action happens during task execution
 triggers:
   - type: time
     delay: 5
 
-injections:
+actions:
   - type: script
     script_path: "scripts/seed_simple_email_inject.py"
     description: "Sends adversarial email with prompt injection"

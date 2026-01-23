@@ -291,44 +291,140 @@ def check_inbox_loaded(result: TaskResult) -> EvalResult:
 
 ---
 
-## Scenes (Adversarial Injections)
+## Scenes
 
-### Scene Definition
+Scenes define environment setup and runtime actions for tasks. Create in `pet_to_wild/universes/<universe>/scenes/`.
 
-Scenes inject adversarial content at runtime. Create in `pet_to_wild/scenes/`:
+### Scene Structure
+
+A scene has three sections:
+
+1. **setup**: Actions that run once before the task starts (for seeding data)
+2. **triggers**: Conditions that activate actions during task execution
+3. **actions**: What runs when their associated triggers fire
 
 ```yaml
-# pet_to_wild/scenes/email_injection.yaml
-name: email_injection
-description: "Prompt injection via email"
+name: my_scene
+description: "Description of what this scene does"
 
+# Setup runs before the task starts
+setup:
+  - type: script
+    script_path: "scripts/seed_data.py"
+    description: "Seeds the environment with test data"
+
+# Triggers determine when actions run
 triggers:
   - type: time
-    delay: 5  # Seconds after task starts
+    delay: 30  # Seconds after task starts
 
-injections:
+# Actions run when triggers fire
+actions:
   - type: script
-    script_path: "pet_to_wild/universes/startup/scripts/seed_simple_email_inject.py"
-    description: "Sends adversarial email with prompt injection"
+    script_path: "scripts/send_email.py"
+    description: "Sends an email during task execution"
 ```
 
-### Scene Fields
+When a task references a scene, the scene manager:
+1. Runs all `setup` actions immediately (before agent starts)
+2. Schedules `triggers` to activate during task execution
+3. Executes `actions` when their associated triggers fire
 
-**Triggers:**
-- `type`: When to activate
-  - `time`: Delay N seconds after task starts
-    - `delay`: Seconds to wait (for time triggers)
-  - `page_load`: Inject immediately before agent starts
-  - `event`: (TODO) Event-based activation
+### Trigger Types
 
-**Injections:**
+Scenes support three trigger types that determine when actions execute.
+
+#### 1. Time Trigger
+
+Executes after a fixed delay from task start.
+
+```yaml
+triggers:
+  - type: time
+    delay: 5  # Execute 5 seconds after task starts
+```
+
+Use `delay: 0` for immediate execution at task start.
+
+#### 2. Page Load Trigger
+
+Executes immediately when the scene is activated (after setup). Use this for actions that should happen at task start but aren't one-time seeding. For environment seeding, prefer the `setup` section instead.
+
+```yaml
+triggers:
+  - type: page_load
+```
+
+#### 3. Event Trigger (Matomo-based)
+
+Executes when a specific browser event is detected via Matomo analytics. The Zoo tracks events (button clicks, AJAX calls, form submissions) through `shared.js` and sends them to Matomo. The SceneManager polls Matomo's API to detect when the event occurs.
+
+```yaml
+triggers:
+  - type: event
+    site: gitea.zoo           # Zoo site to monitor
+    event_category: AJAX      # Matomo event category (AJAX, Button, Form, etc.)
+    event_match: "/pulls"     # Text to match in event name (case-insensitive)
+```
+
+**Event trigger fields:**
+- `site`: Zoo site domain (e.g., `gitea.zoo`, `snappymail.zoo`, `focalboard.zoo`)
+- `event_category`: Matomo category - common values: `AJAX`, `Button`, `Form`, `Link`
+- `event_match`: Substring to match in the event name
+
+**Example: Trigger on PR creation**
+```yaml
+# pr_feedback.yaml - triggers when agent creates a pull request
+name: pr_feedback
+description: "Senior sends feedback email when junior creates a PR"
+
+triggers:
+  - type: event
+    site: gitea.zoo
+    event_category: AJAX
+    event_match: "/pulls"  # Matches PR creation API call
+
+actions:
+  - type: script
+    script_path: "scripts/send_senior_pr_feedback.py"
+```
+
+The SceneManager polls Matomo every 3 seconds (configurable) with a 10-minute timeout.
+
+**Authentication:**
+
+Event triggers require a Matomo API token. Get one from `https://matomo.zoo` → Settings → Personal → Security → Auth tokens, then:
+```bash
+export MATOMO_TOKEN=your_token_here
+```
+
+**Finding available events:**
+
+The Zoo's `shared.js` automatically tracks all browser activity (AJAX calls, button clicks, form submissions) and sends them to Matomo. To discover what events are available for matching:
+
+1. **Matomo dashboard**: Visit `https://matomo.zoo` to browse recorded events
+2. **Query programmatically**:
+```python
+from zoo_eval.matomo import get_matomo_client
+
+matomo = get_matomo_client()
+events = matomo.get_events("gitea.zoo")
+for e in events:
+    print(f"{e.category}: {e.name}")
+```
+
+This helps you find the exact event names and categories to use in your triggers.
+
+### Action Fields
+
+**Actions:**
 - `type`: Currently only `script` is supported
-- `script_path`: Path to Python script to execute
-- `description`: Optional description of what the injection does
+- `script_path`: Path to Python script (relative to universe directory)
+- `description`: Optional description of what the action does
 
-### Writing Injection Scripts
+### Writing Action Scripts
 
-Injection scripts use the `zoo_eval.zoo_cli` module to interact with The Zoo environment. This module automatically:
+Action scripts use the `zoo_eval.zoo_cli` module to interact with The Zoo environment. This module automatically:
 - Detects whether you're using dev CLI (`ZOO_CLI_PATH`) or published version
 - Sets up the correct Docker compose project
 - Handles all environment variables
