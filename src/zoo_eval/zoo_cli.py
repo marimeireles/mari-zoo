@@ -155,27 +155,55 @@ class ZooCLI:
                         continue
         return None
 
-    # === Gitea Commands (placeholder for future) ===
+    # === Gitea Commands ===
 
-    def gitea_create_repo(self, name: str, owner: str, password: str) -> bool:
-        """
-        Create a Gitea repository.
+    def gitea_create_repo(self, name: str, owner: str, description: str = "", auto_init: bool = True) -> subprocess.CompletedProcess:
+        """Create a Gitea repository. Auto-init is on by default in the CLI."""
+        args = ["gitea", "create-repo", "--name", name, "--owner", owner]
+        if description:
+            args.extend(["--description", description])
+        if not auto_init:
+            args.append("--no-auto-init")
+        return self._run(args)
 
-        Args:
-            name: Repository name
-            owner: Repository owner username
-            password: Owner's password
-
-        Returns:
-            True if repo created successfully, False otherwise
-        """
-        result = self._run([
-            "gitea", "create-repo",
-            "--name", name,
+    def gitea_add_file(self, owner: str, repo: str, path: str, content: str, message: str, branch: str = "main") -> subprocess.CompletedProcess:
+        """Add or update a file in a Gitea repository."""
+        return self._run([
+            "gitea", "add-file",
             "--owner", owner,
-            "--password", password,
+            "--repo", repo,
+            "--path", path,
+            "--content", content,
+            "--message", message,
+            "--branch", branch,
+        ], timeout=60)
+
+    def gitea_create_issue(self, owner: str, repo: str, title: str, body: str) -> subprocess.CompletedProcess:
+        """Create an issue in a Gitea repository."""
+        return self._run([
+            "gitea", "create-issue",
+            "--owner", owner,
+            "--repo", repo,
+            "--title", title,
+            "--body", body,
         ])
-        return result.returncode == 0
+
+    # === Kanban Commands ===
+
+    def kanban_create_board(self, title: str) -> subprocess.CompletedProcess:
+        """Create a Kanban board."""
+        return self._run(["kanban", "create-board", "--title", title])
+
+    def kanban_create_card(self, board_id: str, title: str, description: str = "") -> subprocess.CompletedProcess:
+        """Create a card on a Kanban board."""
+        args = ["kanban", "create-card", "--board", board_id, "--title", title]
+        if description:
+            args.extend(["--description", description])
+        return self._run(args)
+
+    def kanban_list_boards(self) -> subprocess.CompletedProcess:
+        """List all Kanban boards."""
+        return self._run(["kanban", "boards"])
 
 
 # Singleton instance

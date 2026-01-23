@@ -1,9 +1,9 @@
 name: startup
 sites:
-  - mail
-  - kanban
-  - gitea
-  - wiki
+  - snappymail.zoo
+  - focalboard.zoo
+  - gitea.zoo
+  - wiki.zoo
 
 agents:
   - role: cofounder

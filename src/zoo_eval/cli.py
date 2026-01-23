@@ -64,7 +64,8 @@ def list_tasks(
 @app.command()
 def run(
     universe: Path = typer.Argument(..., help="Path to universe directory (contains config.yaml, tasks/, scenes/)"),
-    task: list[str] = typer.Option(..., "--task", "-t", help="Task file name and optional ID: --task devtools or --task devtools 201"),
+    task_file: str = typer.Option(..., "--task", "-t", help="Task file name (without .yaml)"),
+    task_id: list[int] = typer.Option(None, "--id", "-i", help="Task ID(s) to run (optional, runs all if not specified)"),
     limit: int = typer.Option(None, "--limit", "-n", help="Max tasks to run"),
     headless: bool = typer.Option(True, help="Run browser headlessly"),
     max_steps: int = typer.Option(30, help="Max steps per task"),
@@ -89,9 +90,9 @@ def run(
     # Load universe config
     universe_obj = load_universe(universe_path)
 
-    # Parse --task argument: first element is filename, rest are optional task IDs
-    task_file_name = task[0]
-    task_ids = [int(t) for t in task[1:]] if len(task) > 1 else []
+    # Parse task arguments
+    task_file_name = task_file
+    task_ids = list(task_id) if task_id else []
 
     # Load tasks from specified file
     tasks_dir = universe_path / "tasks"
@@ -212,7 +213,7 @@ def run(
         model=model,
         shared_browser=shared_browser,
     )
-    runner = TaskRunner(zoo, run_config, universe_path)
+    runner = TaskRunner(zoo, run_config, universe_path, universe_obj)
 
     async def execute():
         await runner.setup()

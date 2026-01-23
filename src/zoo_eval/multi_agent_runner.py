@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .models import AgentResult, RunConfig, Task, TaskAgentConfig, TaskResult
+from .models import AgentResult, RunConfig, Task, TaskAgentConfig, TaskResult, Universe
 from .scenes import SceneManager
 from .zoo import Zoo
 
@@ -16,16 +16,52 @@ from .zoo import Zoo
 class MultiAgentRunner:
     """Runs tasks with multiple concurrent agents."""
 
-    def __init__(self, zoo: Zoo, config: RunConfig | None = None, universe_path: Path | None = None):
+    def __init__(self, zoo: Zoo, config: RunConfig | None = None, universe_path: Path | None = None, universe: Universe | None = None):
         self.zoo = zoo
         self.config = config or RunConfig()
         self.universe_path = universe_path
+        self.universe = universe
         self._llm = None
 
     async def setup(self):
         """Initialize browser_use components."""
         os.environ["ANONYMIZED_TELEMETRY"] = "false"
         self._llm = self._create_llm()
+
+    def _get_universe_agent(self, agent_name: str):
+        """Get the universe agent config by name."""
+        if not self.universe:
+            return None
+        for agent in self.universe.agents:
+            if agent.name == agent_name:
+                return agent
+        return None
+
+    def _build_agent_context(self, agent_config: TaskAgentConfig) -> str:
+        """Build the agent context string from universe config."""
+        universe_agent = self._get_universe_agent(agent_config.name)
+
+        # Start with name
+        context = f"You are {agent_config.name}"
+
+        # Add role if available
+        if universe_agent and universe_agent.role:
+            context += f", a {universe_agent.role}"
+        context += "."
+
+        # Add persona if available
+        if universe_agent and universe_agent.persona:
+            context += f" {universe_agent.persona}"
+
+        # Add goal if available
+        if universe_agent and universe_agent.goal:
+            context += f" Your goal: {universe_agent.goal}"
+
+        # Add accessible sites
+        if self.universe and self.universe.sites:
+            context += f"\nYou can access: {', '.join(self.universe.sites)}"
+
+        return context
 
     def _create_llm(self):
         """Create LLM based on model config."""
@@ -81,6 +117,9 @@ class MultiAgentRunner:
             # Create fresh browser for this agent
             browser = await self._create_browser()
 
+            # Build agent context from universe config
+            agent_context = self._build_agent_context(agent_config)
+
             # Build login hint from agent's credentials
             login_hint = ""
             if agent_config.require_login and agent_config.username and agent_config.password:
@@ -89,7 +128,7 @@ class MultiAgentRunner:
             # Use autonomy level if available, otherwise fall back to task intent
             task_instruction = agent_config.autonomy_levels.get(autonomy_level, task.intent)
             full_task = (
-                f"You are {agent_config.name}. "
+                f"{agent_context}\n\n"
                 f"Go to {start_url}. {login_hint}{task_instruction}"
             )
 
@@ -207,6 +246,9 @@ class MultiAgentRunner:
                 start_time = time.time()
 
                 try:
+                    # Build agent context from universe config
+                    agent_context = self._build_agent_context(agent_config)
+
                     # Build login hint from agent's credentials
                     login_hint = ""
                     if agent_config.require_login and agent_config.username and agent_config.password:
@@ -215,7 +257,7 @@ class MultiAgentRunner:
                     # Use autonomy level if available, otherwise fall back to task intent
                     task_instruction = agent_config.autonomy_levels.get(autonomy_level, task.intent)
                     full_task = (
-                        f"You are {agent_config.name}. "
+                        f"{agent_context}\n\n"
                         f"Go to {start_url}. {login_hint}{task_instruction}"
                     )
 

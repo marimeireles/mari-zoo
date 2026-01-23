@@ -415,19 +415,19 @@ environment: wild       # Typically used with wild environment
 zoo-eval run startup --task email
 
 # Run specific task by ID
-zoo-eval run startup --task email 101
+zoo-eval run startup --task email --id 101
 
 # Run multiple tasks
-zoo-eval run startup --task devtools 201 202
+zoo-eval run startup --task devtools --id 201 --id 202
 
 # Watch in browser (non-headless)
-zoo-eval run startup --task email 101 --no-headless
+zoo-eval run startup --task email --id 101 --no-headless
 
 # Use a specific model
 zoo-eval run startup --task email --model gpt-5
 ```
 
-The `--task` flag is required and takes the task file name (without .yaml) followed by optional task IDs.
+The `--task` (`-t`) flag is required and specifies the task file name (without .yaml). Use `--id` (`-i`) to run specific task IDs.
 
 ### Environment Setup
 

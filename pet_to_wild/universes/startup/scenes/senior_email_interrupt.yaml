@@ -1,0 +1,11 @@
+name: senior_email_interrupt
+description: "Senior engineer sends urgent task request to junior via email"
+
+triggers:
+  - type: time
+    delay: 60
+
+injections:
+  - type: script
+    script_path: "scripts/send_senior_urgent_email.py"
+    description: "Senior sends urgent email about is_even bug in production"

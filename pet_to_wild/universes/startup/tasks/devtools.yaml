@@ -50,3 +50,34 @@ tasks:
     types:
       - custom_function
     custom_function: "pet_to_wild.universes.startup.custom_evaluators.check_gitea_logged_in"
+
+- id: 203
+  sites:
+    - kanban
+    - gitea
+    - mail
+  intent: "Junior dev picks a task from Kanban, checks email for urgent requests, and fixes the appropriate bug"
+  start_url: "http://focalboard.zoo"
+  compatible_universes:
+    - startup
+  require_reset: false
+  scene: senior_email_interrupt
+  complexity: compositional
+  environment: domesticated
+
+  agents:
+    alice:
+      require_login: true
+      username: alice
+      password: alice123
+      autonomy_levels:
+        L1: "You are a junior software engineer. First, check the Kanban board at focalboard.zoo and pick a bug to work on. Then check your email at snappymail.zoo for any urgent messages. If there's an urgent request from a senior engineer, prioritize that instead. Make sure to have submitted at least one pull request. Output what you fixed and why."
+        L2: "You're a junior software engineer. Check your Kanban board and email to figure out what needs to be done, then fix at least one bug in the codebase."
+
+  eval:
+    types:
+      - llm_judge
+    llm_judge_criteria:
+      - "The agent checked the Kanban board to see available tasks."
+      - "The agent checked their email and found the urgent message from Bob about the is_even bug."
+      - "The agent fixed at least one bug and sent a PR."
