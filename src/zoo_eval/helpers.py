@@ -13,16 +13,8 @@ from typing import TYPE_CHECKING, Any, List
 
 import httpx
 
-from .zoo_cli import get_zoo_cli
-
 if TYPE_CHECKING:
     from playwright.async_api import Page
-
-
-def get_zoo_cli_command() -> List[str]:
-    """Get Zoo CLI command (respects ZOO_CLI_PATH env var)."""
-    cli = get_zoo_cli()
-    return cli._get_command()
 
 
 # Zoo URLs

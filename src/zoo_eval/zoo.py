@@ -4,22 +4,38 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from dataclasses import dataclass
 
 import httpx
 
 
-def get_zoo_cli_command() -> list[str]:
-    """Get the Zoo CLI command to use.
+def _get_compose_project() -> str:
+    """Auto-detect running Zoo docker compose project."""
+    if env_project := os.environ.get("ZOO_COMPOSE_PROJECT_NAME"):
+        return env_project
 
-    Respects ZOO_CLI_PATH env var if set, otherwise uses npx.
-    To use dev version: export ZOO_CLI_PATH=/path/to/the_zoo/dist/bin/thezoo.js
-    Or run 'npm link' in the_zoo directory to symlink dev version globally.
-    """
-    cli_path = os.environ.get("ZOO_CLI_PATH")
-    if cli_path:
-        return ["node", cli_path]
-    return ["npx", "the_zoo"]
+    try:
+        # Filter for stalwart specifically - it has a simple name format: {project}-stalwart-{n}
+        # Other containers like snappymail-zoo have compound service names that break parsing
+        result = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}", "--filter", "name=stalwart"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout:
+            # Container name format: {project}-stalwart-{replica}
+            # e.g., "the_zoo-stalwart-1" -> "the_zoo"
+            container = result.stdout.strip().split("\n")[0]
+            parts = container.rsplit("-", 2)
+            if len(parts) >= 3:
+                return parts[0]
+    except Exception:
+        pass
+
+    return "the_zoo"
+
 
 # URL mappings for WebArena-style placeholders
 URL_MAPPINGS = {
@@ -37,7 +53,6 @@ class ZooConfig:
     """Configuration for Zoo connection."""
 
     proxy_url: str = "http://localhost:3128"
-    instance: str | None = None
 
 
 class Zoo:
@@ -46,6 +61,14 @@ class Zoo:
     def __init__(self, config: ZooConfig | None = None):
         self.config = config or ZooConfig()
         self._client: httpx.Client | None = None
+        self._project: str | None = None
+
+    @property
+    def project(self) -> str:
+        """Get the compose project name."""
+        if self._project is None:
+            self._project = _get_compose_project()
+        return self._project
 
     @property
     def client(self) -> httpx.Client:
@@ -64,18 +87,17 @@ class Zoo:
             url = url.replace(placeholder, real_url)
         return url
 
-    def run_cli(self, *args: str) -> subprocess.CompletedProcess:
-        """Run a Zoo CLI command."""
-        cmd = get_zoo_cli_command() + list(args)
-        if self.config.instance:
-            cmd.extend(["--instance", self.config.instance])
+    def _docker_compose(self, *args: str, timeout: int = 60) -> subprocess.CompletedProcess:
+        """Run a docker compose command."""
+        cmd = ["docker", "compose", "-p", self.project] + list(args)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
-        # If using dev CLI path, set ZOO_DEV=1 to use main dev instance
-        env = os.environ.copy()
-        if os.environ.get("ZOO_CLI_PATH"):
-            env["ZOO_DEV"] = "1"
-
-        return subprocess.run(cmd, capture_output=True, text=True, env=env)
+    def _docker_compose_exec(
+        self, service: str, command: list[str], timeout: int = 30
+    ) -> subprocess.CompletedProcess:
+        """Run a command inside a docker compose service."""
+        cmd = ["docker", "compose", "-p", self.project, "exec", "-T", service] + command
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
     def is_running(self) -> bool:
         """Check if Zoo is running and accessible."""
@@ -87,13 +109,74 @@ class Zoo:
 
     def reset_databases(self) -> bool:
         """Reset all databases to initial state."""
-        result = self.run_cli("restart")
+        result = self._docker_compose("restart")
         return result.returncode == 0
 
-    def restart(self) -> bool:
-        """Restart Zoo environment (fast, ~2-3 seconds)."""
-        result = self.run_cli("restart")
-        return result.returncode == 0
+    def restart(self, services: list[str] | None = None) -> bool:
+        """Restart Zoo environment in correct dependency order.
+
+        Args:
+            services: Optional list of services to restart. If None, restarts all.
+        """
+        # Core infrastructure must start first
+        core = ["coredns", "caddy", "postgres", "mysql", "redis", "proxy"]
+        # Auth layer depends on core
+        auth = ["hydra", "stalwart"]
+        # Apps depend on core + auth
+        apps = ["auth-zoo", "gitea-zoo", "focalboard-zoo", "snappymail-zoo", "wiki-zoo", "analytics-zoo"]
+
+        if services:
+            # Filter to only requested services, but maintain order
+            core = [s for s in core if s in services]
+            auth = [s for s in auth if s in services]
+            apps = [s for s in apps if s in services]
+
+        # Restart in stages, waiting for health checks between
+        for stage_name, stage_services in [("core", core), ("auth", auth), ("apps", apps)]:
+            if not stage_services:
+                continue
+            result = self._docker_compose("restart", *stage_services)
+            if result.returncode != 0:
+                print(f"Warning: Failed to restart {stage_name} services")
+            # Wait for this stage to be healthy before next
+            self.wait_for_services(stage_services, timeout=60)
+
+        return True
+
+    def wait_for_services(self, services: list[str], timeout: int = 60, verbose: bool = False) -> bool:
+        """Wait for services to be healthy (or just 'Up' if no health check).
+
+        Args:
+            services: List of service names to wait for
+            timeout: Maximum seconds to wait
+            verbose: Print progress dots
+        """
+        if verbose:
+            print(f"Waiting for services: {', '.join(services)}...", end="", flush=True)
+
+        start = time.time()
+        while time.time() - start < timeout:
+            all_ready = True
+            for service in services:
+                result = self._docker_compose("ps", service, "--format", "{{.Status}}")
+                if result.returncode != 0:
+                    all_ready = False
+                    break
+                status = result.stdout.strip().lower()
+                if not status or "unhealthy" in status or "starting" in status or "exited" in status:
+                    all_ready = False
+                    break
+            if all_ready:
+                if verbose:
+                    print(" ready!")
+                return True
+            if verbose:
+                print(".", end="", flush=True)
+            time.sleep(2)
+
+        if verbose:
+            print(" timeout!")
+        return False
 
     def query_postgres(self, query: str, database: str = "postgres") -> str:
         """Run a query against a PostgreSQL database.
@@ -102,7 +185,10 @@ class Zoo:
             query: SQL query to execute
             database: Database name (default: postgres)
         """
-        result = self.run_cli("shell", "postgres", "-d", database, "-c", query)
+        result = self._docker_compose_exec(
+            "postgres",
+            ["psql", "-U", "postgres", "-d", database, "-c", query],
+        )
         if result.returncode != 0:
             return f"Error: {result.stderr}"
         return result.stdout
@@ -114,7 +200,10 @@ class Zoo:
             query: SQL query to execute
             database: Database name (default: mysql)
         """
-        result = self.run_cli("shell", "mysql", "-D", database, "-e", query)
+        result = self._docker_compose_exec(
+            "mysql",
+            ["mysql", "-u", "root", "-D", database, "-e", query],
+        )
         if result.returncode != 0:
             return f"Error: {result.stderr}"
         return result.stdout
@@ -135,16 +224,13 @@ class Zoo:
         """List tables in a MySQL database."""
         return self.query_mysql("SHOW TABLES;", database)
 
-    def fetch_page(self, url: str) -> str:
-        """Fetch a page through the Zoo proxy."""
-        resolved = self.resolve_url(url)
-        response = self.client.get(resolved)
-        return response.text
-
     def get_status(self) -> dict:
         """Get Zoo instance status."""
-        result = self.run_cli("status")
-        return {"running": result.returncode == 0, "output": result.stdout}
+        result = self._docker_compose("ps", "--format", "json")
+        return {
+            "running": result.returncode == 0,
+            "output": result.stdout,
+        }
 
     def close(self):
         """Close the HTTP client."""

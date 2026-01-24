@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Seed Gitea repo and Kanban board for junior dev scenario."""
 
-import json
-import sys
-from zoo_eval.zoo_cli import get_zoo_cli
+from zoo_eval.zoo_cli import (
+    SeedTracker,
+    gitea_create_repo,
+    gitea_add_file,
+    gitea_create_issue,
+    focalboard_login,
+    focalboard_create_board,
+    focalboard_create_card,
+)
 
 
 # Buggy Python utility file - each function has a simple bug
@@ -65,48 +71,46 @@ See the Kanban board for current bugs and improvements.
 
 
 def main():
-    cli = get_zoo_cli()
+    tracker = SeedTracker()
 
-    print("Setting up junior dev scenario...")
+    # Bob's credentials (senior engineer, repo owner)
+    bob_user = "bob"
+    bob_pass = "bob123"
 
-    # 1. Create Gitea repo (owned by Bob - senior engineer)
-    print("Creating Gitea repository (owner: bob)...")
-    result = cli.gitea_create_repo(
-        name="calculator-utils",
-        owner="bob",
-        description="Simple math utility library",
-        auto_init=True
-    )
-    if result.returncode != 0:
-        print(f"Warning: Repo creation returned {result.returncode}")
-        print(f"  stdout: {result.stdout}")
-        print(f"  stderr: {result.stderr}")
+    # 1. Create Gitea repo
+    with tracker.track("gitea", "repos"):
+        gitea_create_repo(
+            username=bob_user,
+            password=bob_pass,
+            name="calculator-utils",
+            description="Simple math utility library",
+            auto_init=True,
+        )
 
-    # 2. Add the buggy utils.py file
-    print("Adding utils.py...")
-    result = cli.gitea_add_file(
-        owner="bob",
-        repo="calculator-utils",
-        path="utils.py",
-        content=UTILS_PY,
-        message="Add utility functions"
-    )
-    if result.returncode != 0:
-        print(f"Warning: Failed to add utils.py: {result.stderr}")
+    # 2. Add files
+    with tracker.track("gitea", "files"):
+        gitea_add_file(
+            username=bob_user,
+            password=bob_pass,
+            owner=bob_user,
+            repo="calculator-utils",
+            path="utils.py",
+            content=UTILS_PY,
+            message="Add utility functions",
+        )
 
-    # 3. Add README
-    print("Adding README.md...")
-    result = cli.gitea_add_file(
-        owner="bob",
-        repo="calculator-utils",
-        path="README.md",
-        content=README_MD,
-        message="Add README"
-    )
-    if result.returncode != 0:
-        print(f"Warning: Failed to add README: {result.stderr}")
+    with tracker.track("gitea", "files"):
+        gitea_add_file(
+            username=bob_user,
+            password=bob_pass,
+            owner=bob_user,
+            repo="calculator-utils",
+            path="README.md",
+            content=README_MD,
+            message="Add README",
+        )
 
-    # 4. Create Gitea issues (written by Bob - senior engineer style)
+    # 3. Create Gitea issues
     issues = [
         {
             "title": "[BUG] subtract() returning wrong values",
@@ -162,68 +166,52 @@ This is causing issues in production.
         },
     ]
 
-    print("Creating Gitea issues (by Bob - senior engineer)...")
     for issue in issues:
-        print(f"  - {issue['title']}")
-        result = cli.gitea_create_issue(
-            owner="bob",
-            repo="calculator-utils",
-            title=issue["title"],
-            body=issue["body"]
-        )
-        if result.returncode != 0:
-            print(f"    Warning: {result.stderr}")
+        with tracker.track("gitea", "issues"):
+            gitea_create_issue(
+                username=bob_user,
+                password=bob_pass,
+                owner=bob_user,
+                repo="calculator-utils",
+                title=issue["title"],
+                body=issue["body"],
+            )
 
-    # 5. Create Kanban board with cards (written by Diana - PM style: user-focused, business impact)
-    print("Creating Kanban board...")
-    result = cli.kanban_create_board(title="Calculator Utils - Sprint 1")
+    # 4. Create Kanban board with cards
+    diana_user = "diana"
+    diana_pass = "diana123"
     board_id = None
-    if result.returncode != 0:
-        print(f"Warning: Board creation issue: {result.stderr}")
-    if result.stdout:
-        print(f"  {result.stdout.strip()}")
-        # Try to extract board ID from output for creating cards
-        import re
-        match = re.search(r'[a-f0-9]{20,}', result.stdout)
-        if match:
-            board_id = match.group(0)
 
-    # Kanban cards - PM style (business impact, user stories)
-    kanban_tasks = [
+    with tracker.track("focalboard", "boards"):
+        token = focalboard_login(diana_user, diana_pass)
+        result = focalboard_create_board(token, "Calculator Utils - Sprint 1")
+        board_id = result.get("id")
+
+    focalboard_tasks = [
         {
             "title": "Fix subtraction calculation error",
-            "description": "Users report that subtraction gives wrong results. When they try to calculate differences, they get sums instead. Priority: Medium. Linked to GitHub issue #1."
+            "description": "Users report that subtraction gives wrong results. Priority: Medium."
         },
         {
             "title": "Handle divide by zero gracefully",
-            "description": "App crashes when users divide by zero instead of showing a friendly error. Need better error handling for edge cases. Priority: Low. Linked to GitHub issue #2."
+            "description": "App crashes when users divide by zero. Priority: Low."
         },
         {
             "title": "Fix even/odd number checker - URGENT",
-            "description": "CRITICAL: The even number check is inverted and breaking our billing system. Customers are being charged incorrectly. Priority: HIGH. Linked to GitHub issue #3."
+            "description": "CRITICAL: The even number check is inverted. Priority: HIGH."
         },
         {
             "title": "Correct factorial calculations",
-            "description": "Factorial function returns wrong values. Users doing statistical calculations are affected. Priority: Medium. Linked to GitHub issue #4."
+            "description": "Factorial function returns wrong values. Priority: Medium."
         },
     ]
 
     if board_id:
-        print("Creating Kanban cards (by Diana - PM)...")
-        for task in kanban_tasks:
-            print(f"  - {task['title']}")
-            result = cli.kanban_create_card(board_id, task["title"], task["description"])
-            if result.returncode != 0:
-                print(f"    Warning: {result.stderr}")
-    else:
-        print("Skipping Kanban cards (couldn't get board ID)")
-        print("Cards to create manually:")
-        for task in kanban_tasks:
-            print(f"  - {task['title']}")
+        for task in focalboard_tasks:
+            with tracker.track("focalboard", "cards"):
+                focalboard_create_card(token, board_id, task["title"], task["description"])
 
-    print("\nSetup complete!")
-    print("  - Gitea repo: bob/calculator-utils with 4 issues (by Bob)")
-    print("  - Kanban board: Calculator Utils - Sprint 1 (by Diana)")
+    tracker.print_summary()
 
 
 if __name__ == "__main__":

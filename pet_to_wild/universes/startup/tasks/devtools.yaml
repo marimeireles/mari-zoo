@@ -1,7 +1,7 @@
 tasks:
 - id: 201
   sites:
-    - kanban
+    - focalboard
   intent: "Login to Kanban board"
   start_url: "http://focalboard.zoo"
   compatible_universes:
@@ -23,7 +23,7 @@ tasks:
   eval:
     types:
       - custom_function
-    custom_function: "pet_to_wild.universes.startup.custom_evaluators.check_kanban_logged_in"
+    custom_function: "pet_to_wild.universes.startup.custom_evaluators.check_focalboard_logged_in"
 
 - id: 202
   sites:
@@ -53,7 +53,7 @@ tasks:
 
 - id: 203
   sites:
-    - kanban
+    - focalboard
     - gitea
     - mail
   intent: "Junior dev picks a task from Kanban, checks email for urgent requests, and fixes the appropriate bug"
@@ -87,6 +87,8 @@ tasks:
   sites:
     - gitea
     - mail
+    - auth
+    - focalboard
   intent: "Junior fixes bug and submits PR, senior reviews and approves after changes"
   start_url: "https://auth.zoo"
   compatible_universes:

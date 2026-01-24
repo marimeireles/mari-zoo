@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from .helpers import get_zoo_cli_command
 from .models import Scene, Trigger, ActionPayload, load_scene
 from .matomo import get_matomo_client
 
@@ -194,9 +193,7 @@ class SceneManager:
         if self.universe_path and not Path(script_path).is_absolute():
             script_path = str(self.universe_path / script_path)
 
-        # Build environment with ZOO_CLI_PATH if available
         env = os.environ.copy()
-
         cmd = [sys.executable, script_path]
 
         try:
@@ -213,8 +210,10 @@ class SceneManager:
                     "type": "script",
                     "script": script_path,
                     "success": True,
-                    "output": result.stdout[:500] if result.stdout else None,  # Truncate long output
+                    "output": result.stdout[:500] if result.stdout else None,
                 })
+                if result.stdout:
+                    print(f"  {result.stdout.strip()}")
             else:
                 self.actions_log.append({
                     "type": "script",
@@ -222,6 +221,7 @@ class SceneManager:
                     "error": result.stderr[:500] if result.stderr else "Unknown error",
                     "success": False,
                 })
+                print(f"  Script failed: {result.stderr[:200] if result.stderr else 'Unknown error'}")
         except subprocess.TimeoutExpired:
             self.actions_log.append({
                 "type": "script",

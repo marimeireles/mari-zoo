@@ -4,6 +4,30 @@ sites:
   - focalboard.zoo
   - gitea.zoo
   - wiki.zoo
+  - auth.zoo
+
+# Map task site names to Docker service names for health checks
+services:
+  mail:
+    - stalwart
+    - snappymail-zoo
+  gitea:
+    - gitea-zoo
+  focalboard:
+    - focalboard-zoo
+  auth:
+    - auth-zoo
+    - hydra
+  wiki:
+    - wiki-zoo
+  # Core services always needed
+  _core:
+    - proxy
+    - coredns
+    - caddy
+    - postgres
+    - mysql
+    - redis
 
 agents:
   - role: cofounder

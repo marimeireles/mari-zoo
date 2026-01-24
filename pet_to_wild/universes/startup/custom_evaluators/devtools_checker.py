@@ -4,7 +4,7 @@ from zoo_eval.evaluators import EvalResult
 from zoo_eval.models import EvalType, TaskResult
 
 
-def check_kanban_logged_in(result: TaskResult) -> EvalResult:
+def check_focalboard_logged_in(result: TaskResult) -> EvalResult:
     """Check if user successfully logged into Kanban (Focalboard)."""
     page_content = result.page_content or ""
     agent_answer = result.agent_answer or ""

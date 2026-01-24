@@ -203,17 +203,11 @@ class Evaluation:
 
     @classmethod
     def from_dict(cls, data: dict) -> Evaluation:
-        # Support both old format (eval_types) and new format (types)
-        types_key = "types" if "types" in data else "eval_types"
-        answers_key = "answers" if "answers" in data else "reference_answers"
-        url_key = "url" if "url" in data else "reference_url"
-        html_key = "html_checks" if "html_checks" in data else "program_html"
-
         return cls(
-            eval_types=[EvalType(t) for t in data.get(types_key, [])],
-            reference_answers=ReferenceAnswers.from_dict(data.get(answers_key)),
-            reference_url=data.get(url_key) or None,
-            program_html=[HTMLCheck.from_dict(h) for h in data.get(html_key, []) or []],
+            eval_types=[EvalType(t) for t in data.get("types", [])],
+            reference_answers=ReferenceAnswers.from_dict(data.get("answers")),
+            reference_url=data.get("url") or None,
+            program_html=[HTMLCheck.from_dict(h) for h in data.get("html_checks", []) or []],
             db_query=DBQuery.from_dict(data.get("db_query")),
             llm_judge_criteria=data.get("llm_judge_criteria", []),
             custom_function=data.get("custom_function"),
@@ -267,6 +261,7 @@ class Universe:
     name: str
     sites: list[str]  # List of active site names
     agents: list[AgentConfig]
+    services: dict[str, list[str]]  # Map site names to Docker service names
 
     @classmethod
     def from_dict(cls, data: dict) -> Universe:
@@ -277,7 +272,18 @@ class Universe:
             name=data["name"],
             sites=data.get("sites", []),
             agents=agents,
+            services=data.get("services", {}),
         )
+
+    def get_services_for_sites(self, site_names: list[str]) -> list[str]:
+        """Get Docker service names needed for the given task sites."""
+        services = set()
+        # Always include core services
+        services.update(self.services.get("_core", []))
+        # Add services for each requested site
+        for site in site_names:
+            services.update(self.services.get(site, []))
+        return list(services)
 
 
 @dataclass
@@ -291,7 +297,6 @@ class Task:
     agents: dict[str, TaskAgentConfig] = field(default_factory=dict)
     compatible_universes: list[str] = field(default_factory=list)
     require_reset: bool = False
-    storage_state: str | None = None
     evaluation: Evaluation = field(default_factory=lambda: Evaluation(eval_types=[]))
     instantiation_dict: dict[str, Any] = field(default_factory=dict)
     # Benchmark-specific fields
@@ -335,7 +340,6 @@ class Task:
             agents=agents,
             compatible_universes=data.get("compatible_universes", []),
             require_reset=data.get("require_reset", False),
-            storage_state=data.get("storage_state"),
             evaluation=Evaluation.from_dict(data.get("eval", {})),
             instantiation_dict=data.get("instantiation_dict", {}),
             complexity=complexity,

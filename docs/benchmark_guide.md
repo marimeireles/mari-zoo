@@ -391,13 +391,6 @@ actions:
 
 The SceneManager polls Matomo every 3 seconds (configurable) with a 10-minute timeout.
 
-**Authentication:**
-
-Event triggers require a Matomo API token. Get one from `https://matomo.zoo` → Settings → Personal → Security → Auth tokens, then:
-```bash
-export MATOMO_TOKEN=your_token_here
-```
-
 **Finding available events:**
 
 The Zoo's `shared.js` automatically tracks all browser activity (AJAX calls, button clicks, form submissions) and sends them to Matomo. To discover what events are available for matching:
@@ -424,10 +417,10 @@ This helps you find the exact event names and categories to use in your triggers
 
 ### Writing Action Scripts
 
-Action scripts use the `zoo_eval.zoo_cli` module to interact with The Zoo environment. This module automatically:
-- Detects whether you're using dev CLI (`ZOO_CLI_PATH`) or published version
-- Sets up the correct Docker compose project
-- Handles all environment variables
+Action scripts use the `zoo_eval.zoo_cli` module to interact with The Zoo environment. This module:
+- Calls REST APIs directly for Gitea and Focalboard (via the Zoo proxy)
+- Uses `docker compose exec` for email (SMTP/IMAP require container access)
+- Auto-detects the running Zoo compose project
 
 **Example Script:**
 
@@ -435,8 +428,7 @@ Action scripts use the `zoo_eval.zoo_cli` module to interact with The Zoo enviro
 #!/usr/bin/env python3
 """Seed multiple contextual emails."""
 
-import sys
-from zoo_eval.zoo_cli import send_email_with_result, check_inbox
+from zoo_eval.zoo_cli import send_email_with_result
 
 def main():
     emails = [
@@ -473,23 +465,33 @@ if __name__ == "__main__":
 
 ```python
 from zoo_eval.zoo_cli import (
+    # Email (via docker compose exec)
     send_email,              # Send email, returns bool
-    send_email_with_result,  # Send email, returns full result (for debugging)
+    send_email_with_result,  # Send email, returns CompletedProcess
     check_inbox,             # Check inbox count, returns int or None
-    get_zoo_cli,             # Get ZooCLI instance (for advanced usage)
+
+    # Gitea (direct REST API)
+    gitea_list_users,        # List users (requires admin creds)
+    gitea_create_repo,       # Create repository
+    gitea_add_file,          # Add/update file in repo
+    gitea_create_issue,      # Create issue
+
+    # Focalboard/Kanban (direct REST API)
+    focalboard_login,        # Login, returns auth token
+    focalboard_get_teams,    # List teams
+    focalboard_list_boards,  # List boards
+    focalboard_create_board, # Create board
+    focalboard_create_card,  # Create card on board
+    focalboard_list_cards,   # List cards on board
 )
 ```
 
-**Using Dev Version of The Zoo:**
+All functions require explicit credentials - there are no hardcoded defaults.
 
-Set `ZOO_CLI_PATH` when running zoo-eval:
+**Environment Variables:**
 
-```bash
-ZOO_CLI_PATH=/path/to/the_zoo/dist/bin/thezoo.js \
-  zoo-eval run pet_to_wild/tasks/email.yaml --universe startup
-```
-
-The `zoo_cli` module automatically detects this and uses your dev version.
+- `ZOO_PROXY_PORT`: Proxy port (default: 3128)
+- `ZOO_COMPOSE_PROJECT_NAME`: Override compose project detection
 
 ### Activating Scenes
 
@@ -497,7 +499,6 @@ Reference scene by name (without .yaml) in task:
 
 ```yaml
 scene: email_injection  # Loads pet_to_wild/scenes/email_injection.yaml
-environment: wild       # Typically used with wild environment
 ```
 
 ---
@@ -534,27 +535,9 @@ docker compose --profile '*' up -d
 # Optional: Set API key for LLM judge
 export OPENAI_API_KEY=your-key
 
-# Optional: Use dev version of The Zoo CLI
-export ZOO_CLI_PATH=~/dev/the_zoo/dist/bin/thezoo.js
+# Optional: Override compose project detection
+export ZOO_COMPOSE_PROJECT_NAME=my-zoo-instance
 ```
-
-### Example Tasks
-
-**Task 101**: Atomic + Domesticated + Custom Function
-- Login to email
-- Simple baseline test
-
-**Task 102**: Atomic + Domesticated + String Match
-- Check inbox for Q4 budget email sender
-- Tests basic email interaction with seeded emails
-
-**Task 103**: Atomic + Domesticated + LLM Judge
-- Coordinate meeting via email
-- Tests composition and semantic correctness
-
-**Task 104**: Compositional + Wild + LLM Judge
-- Read emails and coordinate meeting
-- Tests handling adversarial prompt injection
 
 ---
 

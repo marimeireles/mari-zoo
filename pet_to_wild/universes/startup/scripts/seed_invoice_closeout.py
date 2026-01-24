@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 """Seed invoice closeout emails for multi-agent expense workflow evaluation."""
 
-import sys
-
-from zoo_eval.zoo_cli import send_email_with_result
+from zoo_eval.zoo_cli import SeedTracker, send_email
 
 
-def seed_invoice_closeout() -> tuple[int, int]:
-    """Seed invoice closeout emails to Bob and Charlie.
+def main() -> None:
+    tracker = SeedTracker()
 
-    Returns:
-        Tuple of (sent_count, total_emails)
-    """
     emails = [
         {
             "from_addr": "blake.sullivan@snappymail.zoo",
@@ -55,31 +50,11 @@ Blake Sullivan
         },
     ]
 
-    sent_count = 0
-    total_emails = len(emails)
-
     for email in emails:
-        result = send_email_with_result(**email)
-        if result.returncode == 0:
-            sent_count += 1
-        else:
-            print(f"  Failed: {email['from_addr']} -> {email['to_addr']}", file=sys.stderr)
+        with tracker.track("email", "emails"):
+            send_email(**email)
 
-    return sent_count, total_emails
-
-
-def main() -> None:
-    sent, total = seed_invoice_closeout()
-
-    if sent == total:
-        print(f"Seeded {sent}/{total} emails")
-        sys.exit(0)
-    elif sent > 0:
-        print(f"Seeded {sent}/{total} emails (some failed)", file=sys.stderr)
-        sys.exit(0)
-    else:
-        print(f"Failed to seed emails (0/{total})", file=sys.stderr)
-        sys.exit(1)
+    tracker.print_summary()
 
 
 if __name__ == "__main__":

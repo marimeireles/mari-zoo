@@ -389,13 +389,20 @@ class MultiAgentRunner:
         self, tasks: list[Task]
     ) -> list[TaskResult]:
         """Run tasks with their defined agents."""
-        # Restart Zoo for clean state
-        self.zoo.restart()
-        # Wait for Zoo to be ready
-        for _ in range(10):
-            if self.zoo.is_running():
-                break
-            time.sleep(1)
+        # Collect all sites needed by tasks
+        services = []
+        if self.universe:
+            all_sites = set()
+            for task in tasks:
+                all_sites.update(task.sites)
+            services = self.universe.get_services_for_sites(list(all_sites))
+
+        # Restart only needed services in correct order
+        self.zoo.restart(services if services else None)
+
+        # Wait for services to be healthy
+        if services:
+            self.zoo.wait_for_services(services, timeout=120, verbose=True)
 
         # Reset if any task requires it
         if any(t.require_reset for t in tasks):
