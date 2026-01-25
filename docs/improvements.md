@@ -113,7 +113,7 @@ This document tracks identified improvements and technical debt in the zoo-eval 
   | 85-86 | Single `agent:` field | `agents:` dict format |
   | 256 | `pet_to_wild/tasks/custom_evaluators/` | `pet_to_wild/universes/<universe>/custom_evaluators/` |
 - **Complexity:** Small
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
 
 ---
 

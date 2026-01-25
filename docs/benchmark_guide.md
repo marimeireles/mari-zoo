@@ -41,33 +41,34 @@ Autonomy Score (AS) is computed as weighted average: `AS = (1×CR_L0 + 2×CR_L1 
 
 ### Task YAML Structure
 
-Tasks are defined in YAML files in `pet_to_wild/tasks/`. Here's a complete example:
+Tasks are defined in YAML files in `pet_to_wild/universes/<universe>/tasks/`. Here's a complete example:
 
 ```yaml
 tasks:
 - id: 102
-  agent: alice  # Which agent runs this task (required, matches universe config)
   sites:
     - mail
   intent: "Login to mail and report what a specific email says"
   start_url: "https://snappymail.zoo"
   compatible_universes:
     - startup
-  require_login: true
   require_reset: false
-  username: alice@snappymail.zoo
-  password: alice123
   scene: seed_startup_emails  # Optional: activates a scene
 
   # Benchmark classification
   complexity: atomic              # atomic | compositional | open_ended
   environment: domesticated       # domesticated | tame | wild
 
-  # Autonomy levels (optional - enables autonomy testing)
-  autonomy_levels:
-    L0: "1. Add email and password 2. Login 3. Check inbox 4. Find email about Q4 budget 5. Report sender name"
-    L1: "Check your email inbox for messages about Q4 budget and report who sent it"
-    L2: "Tell me who's been emailing about the quarterly budget"
+  # Agent configuration (per-agent settings)
+  agents:
+    alice:
+      require_login: true
+      username: alice@snappymail.zoo
+      password: alice123
+      autonomy_levels:
+        L0: "1. Add email and password 2. Login 3. Check inbox 4. Find email about Q4 budget 5. Report sender name"
+        L1: "Check your email inbox for messages about Q4 budget and report who sent it"
+        L2: "Tell me who's been emailing about the quarterly budget"
 
   # Evaluation
   eval:
@@ -82,19 +83,20 @@ tasks:
 
 **Core Fields:**
 - `id`: Unique task identifier
-- `agent`: Agent name to run this task (must match an agent `name` in the universe config)
-- `sites`: List of zoo sites needed (e.g., `mail`, `kanban`, `gitea`, `wiki`)
+- `sites`: List of zoo sites needed (e.g., `mail`, `focalboard`, `gitea`, `wiki`)
 - `intent`: High-level description of what the task does
 - `start_url`: Where the agent begins
 - `compatible_universes`: Which universe configs work with this task
-- `require_login`: Whether login is needed
 - `require_reset`: Whether to reset environment before running
-- `username`, `password`: Task-specific credentials (optional)
+
+**Agent Fields** (nested under `agents.<agent_name>`):
+- `require_login`: Whether login is needed for this agent
+- `username`, `password`: Agent-specific credentials
+- `autonomy_levels`: Dict of L0/L1/L2 instruction variants
 
 **Benchmark Fields:**
 - `complexity`: Task complexity level (atomic/compositional/open_ended)
 - `environment`: Adversarial condition (domesticated/tame/wild)
-- `autonomy_levels`: Dict of L0/L1/L2 instruction variants (optional)
 - `scene`: Name of scene file to activate (optional, no .yaml extension)
 
 ---
@@ -203,12 +205,12 @@ Execute custom Python evaluation code.
 eval:
   types:
     - custom_function
-  custom_function: "pet_to_wild.tasks.custom_evaluators.check_inbox_loaded"
+  custom_function: "pet_to_wild.universes.startup.custom_evaluators.check_inbox_loaded"
 ```
 
 **Creating Custom Evaluators:**
 
-1. Create a file in `pet_to_wild/tasks/custom_evaluators/` (e.g., `my_checker.py`)
+1. Create a file in `pet_to_wild/universes/<universe>/custom_evaluators/` (e.g., `my_checker.py`)
 2. Define a function with this signature:
 
 ```python
@@ -253,7 +255,7 @@ def my_custom_check(result: TaskResult) -> EvalResult:
     )
 ```
 
-3. Export it in `pet_to_wild/tasks/custom_evaluators/__init__.py`:
+3. Export it in `pet_to_wild/universes/<universe>/custom_evaluators/__init__.py`:
 
 ```python
 from .my_checker import my_custom_check
@@ -267,12 +269,12 @@ __all__ = ["check_inbox_loaded", "my_custom_check"]
 eval:
   types:
     - custom_function
-  custom_function: "pet_to_wild.tasks.custom_evaluators.my_custom_check"
+  custom_function: "pet_to_wild.universes.startup.custom_evaluators.my_custom_check"
 ```
 
 **Example Custom Evaluator:**
 
-See `pet_to_wild/tasks/custom_evaluators/email_checker.py`:
+See `pet_to_wild/universes/startup/custom_evaluators/email_checker.py`:
 ```python
 def check_inbox_loaded(result: TaskResult) -> EvalResult:
     if 'Inbox' in result.page_content:
