@@ -22,6 +22,8 @@ class RunConfig:
     trace_dir: str = "./traces"
     model: str = "google/gemini-2.5-flash-lite"  # Model to use via OpenRouter
     shared_browser: bool = False  # If True, all agents share the same browser and memory
+    autonomy_levels: list[str] = field(default_factory=lambda: ["L1"])  # Which levels to run (L0, L1, L2)
+    completed_pairs: set[tuple[int, str]] = field(default_factory=set)  # (task_id, level) pairs to skip (for resume)
 
 
 class EvalType(str, Enum):

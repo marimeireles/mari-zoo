@@ -63,7 +63,7 @@ This document tracks identified improvements and technical debt in the zoo-eval 
 ### 5. Add `--level` CLI Flag
 - **Files to modify:**
   - `src/zoo_eval/cli.py` - Add `--level/-L` option
-  - `src/zoo_eval/runner.py` - Pass levels through
+  - `src/zoo_eval/models.py` - Add `autonomy_levels` to `RunConfig`
   - `src/zoo_eval/multi_agent_runner.py:432` - Use passed levels
 - **Issue:** Always runs L0, L1, L2 regardless of user intent. Triples execution time.
 - **Current code:**
@@ -75,7 +75,7 @@ This document tracks identified improvements and technical debt in the zoo-eval 
   2. Default to `["L1"]` if not specified
   3. Thread selected levels through `RunConfig` to runner
 - **Complexity:** Small
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
 
 ---
 
@@ -93,7 +93,10 @@ This document tracks identified improvements and technical debt in the zoo-eval 
 - **Fix:** Use `get_completed_task_level_pairs()` (already exists at line 118) for granular tracking
 - **Also update:** `cli.py:151-156` to check (task_id, level) pairs
 - **Complexity:** Small
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
+  - Added `completed_pairs` to `RunConfig`
+  - Updated `multi_agent_runner.py` to skip completed (task_id, level) pairs
+  - Updated `cli.py` to use `get_completed_task_level_pairs()` and pass to RunConfig
 
 ---
 

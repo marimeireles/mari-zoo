@@ -71,12 +71,20 @@ def run(
     max_steps: int = typer.Option(30, help="Max steps per task"),
     timeout: int = typer.Option(120, help="Timeout in seconds per task"),
     model: str = typer.Option("google/gemini-2.5-flash-lite", "--model", "-m", help="Model: flash, flash-lite, claude, gpt-4o, or provider/model"),
+    judge_model: str = typer.Option(None, "--judge-model", "-j", help="Model for LLM judge evaluation (default: gpt-5)"),
     shared_browser: bool = typer.Option(False, "--shared-browser", help="All agents share same browser and memory"),
+    level: list[str] = typer.Option(["L1"], "--level", "-L", help="Autonomy level(s) to run: L0, L1, L2 (can specify multiple)"),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
     db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
 ):
     """Run evaluation tasks from a universe directory."""
+    import os
+
+    # Set judge model env var if provided via CLI (overrides env var)
+    if judge_model:
+        os.environ["OPENAI_JUDGE_MODEL"] = judge_model
+
     # Resolve universe path
     universe_path = Path(universe)
     if not universe_path.exists():
@@ -147,13 +155,21 @@ def run(
     if task_ids:
         tasks_info += f":{','.join(str(t) for t in task_ids)}"
 
+    # Validate and normalize autonomy levels first (needed for resume check)
+    valid_levels = {"L0", "L1", "L2"}
+    autonomy_levels = [lvl.upper() for lvl in level]
+    invalid = set(autonomy_levels) - valid_levels
+    if invalid:
+        console.print(f"[red]Invalid autonomy level(s): {invalid}. Valid: L0, L1, L2[/red]")
+        raise typer.Exit(1)
+
+    completed_pairs: set[tuple[int, str]] = set()
+
     if resume:
         run_id = db.get_latest_run(str(universe_path))
         if run_id:
-            completed = db.get_completed_task_ids(run_id)
-            original_count = len(tasks)
-            tasks = [t for t in tasks if t.task_id not in completed]
-            console.print(f"Resuming run #{run_id}: {len(completed)} already done, {len(tasks)} remaining")
+            completed_pairs = db.get_completed_task_level_pairs(run_id)
+            console.print(f"Resuming run #{run_id}: {len(completed_pairs)} (task, level) pairs already done")
         else:
             console.print("[yellow]No previous run found, starting fresh[/yellow]")
             run_id = db.create_run(
@@ -170,13 +186,19 @@ def run(
             tasks=tasks_info,
         )
 
-    if not tasks:
+    # Check if all requested (task, level) pairs are already done
+    requested_pairs = {(t.task_id, lvl) for t in tasks for lvl in autonomy_levels}
+    remaining_pairs = requested_pairs - completed_pairs
+    if not remaining_pairs:
         console.print("[green]All tasks already completed![/green]")
         print_report(db, run_id)
         db.close()
         return
 
-    console.print(f"Run #{run_id}: Running {len(tasks)} task(s) with model={model}...")
+    levels_str = ", ".join(autonomy_levels)
+    console.print(f"Run #{run_id}: Running {len(tasks)} task(s) with model={model}, levels=[{levels_str}]...")
+    if completed_pairs:
+        console.print(f"  ({len(remaining_pairs)} remaining, {len(completed_pairs)} already done)")
 
     run_config = RunConfig(
         headless=headless,
@@ -184,6 +206,8 @@ def run(
         timeout_seconds=timeout,
         model=model,
         shared_browser=shared_browser,
+        autonomy_levels=autonomy_levels,
+        completed_pairs=completed_pairs,
     )
     runner = TaskRunner(zoo, run_config, universe_path, universe_obj)
 

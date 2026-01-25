@@ -11,50 +11,82 @@ uv sync
 # Install playwright browsers
 uv run playwright install chromium
 
-# Set API key
+# Set API keys
 export OPENROUTER_API_KEY=your-key    # Required (default uses Gemini 2.5 Flash)
 export OPENAI_API_KEY=your-key        # Required for LLM judge evaluation
+
+# Optional: Override LLM judge model (default: gpt-5)
+export OPENAI_JUDGE_MODEL=gpt-4o
 ```
 
-## Multi-Agent Evaluation
-
-Zoo-eval supports multi-agent evaluation through **Universes**. See [docs/multi-agent.md](docs/multi-agent.md) for details.
-
-## PetToWild Benchmark
-
-Zoo-eval includes the **PetToWild benchmark** for evaluating agent robustness across complexity, environment, and verification dimensions. See [docs/benchmark.md](docs/benchmark.md) for details.
+## Quick Start
 
 ```bash
-# Run test benchmark
-uv run zoo-eval run configs/test_benchmark.yaml --universe startup_universe --model gpt-4o
-```
-
-```bash
-# Start The Zoo first
+# Start The Zoo
 npx the_zoo start
 
-# Run tasks with a universe (required)
-uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model gpt-4o
+# Run a single task (L1 autonomy level by default)
+uv run zoo-eval run startup --task email --id 101
 
 # Watch in browser (non-headless)
-uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model gpt-4o --no-headless
+uv run zoo-eval run startup --task email --id 101 --no-headless
+```
 
-# Run with different models
-uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model claude
-uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model flash
+## Running Tasks
 
+```bash
+# Run specific task by ID
+uv run zoo-eval run startup --task email --id 101
+
+# Run multiple tasks
+uv run zoo-eval run startup --task email --id 101 --id 102
+
+# Run all tasks in a task file
+uv run zoo-eval run startup --task email
+
+# Use a different agent model
+uv run zoo-eval run startup --task email --id 101 --model gpt-4o
+uv run zoo-eval run startup --task email --id 101 --model claude
+
+# Use a different LLM judge model (for evaluation)
+uv run zoo-eval run startup --task email --id 101 --judge-model gpt-4o
+```
+
+## Autonomy Levels
+
+Tasks can run at different autonomy levels (L0=detailed steps, L1=goal+method, L2=goal only):
+
+```bash
+# Run only L1 (default - balanced)
+uv run zoo-eval run startup --task email --id 101
+
+# Run only L0 (most detailed instructions)
+uv run zoo-eval run startup --task email --id 101 --level L0
+
+# Run multiple levels
+uv run zoo-eval run startup --task email --id 101 -L L1 -L L2
+
+# Run all levels (full benchmark)
+uv run zoo-eval run startup --task email --id 101 -L L0 -L L1 -L L2
+```
+
+## Other Options
+
+```bash
 # Shared browser mode (agents run sequentially with shared context)
-uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model gpt-4o --shared-browser
+uv run zoo-eval run startup --task email --shared-browser
 
-# Run specific tasks
-uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model gpt-4o --tasks 1,2,3
-
-# Run with options
-uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model gpt-4o --limit 10 --timeout 180
+# Custom timeout and max steps
+uv run zoo-eval run startup --task email --id 101 --timeout 180 --max-steps 50
 
 # Resume an interrupted run
-uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model gpt-4o --resume
+uv run zoo-eval run startup --task email --resume
 ```
+
+## Documentation
+
+- [Benchmark Guide](docs/benchmark_guide.md) - Full task and evaluation configuration
+- [Multi-Agent](docs/multi-agent.md) - Multi-agent evaluation details
 
 ## Reports
 

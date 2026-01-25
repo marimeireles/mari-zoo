@@ -428,8 +428,13 @@ class MultiAgentRunner:
                 # Get agents list from task
                 agents = list(task.agents.values())
 
-                # Run each task with all autonomy levels
-                for autonomy_level in ["L0", "L1", "L2"]:
+                # Run each task with configured autonomy levels
+                for autonomy_level in self.config.autonomy_levels:
+                    # Skip if this (task_id, level) was already completed (for resume)
+                    if (task.task_id, autonomy_level) in self.config.completed_pairs:
+                        print(f"  Skipping task {task.task_id} {autonomy_level} (already completed)")
+                        continue
+
                     if self.config.shared_browser:
                         # Shared browser: run agents sequentially in same browser
                         result = await self._run_shared_browser_task(agents, task, start_url, autonomy_level)
