@@ -124,28 +124,9 @@ This document tracks identified improvements and technical debt in the zoo-eval 
 ### 8. Add Agent Personas and Goals
 - **File:** `pet_to_wild/universes/startup/config.yaml:35-51`
 - **Issue:** All 4 agents have empty `persona:` and `goal:` fields
-- **Fix:** Add meaningful content, e.g.:
-  ```yaml
-  agents:
-    - role: cofounder
-      name: alice
-      persona: "Focused on product strategy and team coordination. Prefers async communication."
-      goal: "Keep the team aligned and shipping features efficiently."
-    - role: senior_engineer
-      name: bob
-      persona: "Experienced developer who values code quality and mentorship."
-      goal: "Ensure code quality and help junior engineers grow."
-    - role: junior_engineer
-      name: charlie
-      persona: "Eager to learn, sometimes unsure about best practices."
-      goal: "Complete assigned tasks and learn from senior feedback."
-    - role: pm
-      name: diana
-      persona: "Organized, detail-oriented, tracks everything in the Kanban board."
-      goal: "Keep projects on track and stakeholders informed."
-  ```
+- **Fix:** Add meaningful content for each agent role
 - **Complexity:** Small (content creation)
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
 
 ---
 
@@ -162,7 +143,7 @@ This document tracks identified improvements and technical debt in the zoo-eval 
   2. **Move scene inside loop** - Activate scene per autonomy level (requires reset mechanism)
   3. **Add config** - `scene_per_level: bool` option
 - **Complexity:** Medium
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24) - Documented behavior in code and benchmark_guide.md
 
 ---
 

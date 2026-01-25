@@ -419,6 +419,10 @@ class MultiAgentRunner:
             task_start_time = time.time()
 
             # Activate scene once per task (before autonomy level loop)
+            # NOTE: Scene state persists across autonomy levels. This means:
+            # - Setup scripts (e.g., seeding emails) run once
+            # - L0 sees fresh state, L1/L2 see accumulated state (e.g., emails marked as read)
+            # - If you need isolated state per level, run levels separately with --level
             scene_manager = None
             if task.scene_name:
                 scene_manager = SceneManager(self.zoo, self.universe_path)

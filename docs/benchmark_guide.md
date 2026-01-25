@@ -327,6 +327,20 @@ actions:
     description: "Sends an email during task execution"
 ```
 
+**Important: Scene State Persistence**
+
+When running multiple autonomy levels (L0, L1, L2), scene state persists across levels:
+- Setup scripts run **once** before L0
+- L0 sees fresh environment state
+- L1 and L2 see accumulated state (e.g., emails already read, PRs already created)
+
+If you need isolated state per autonomy level, run levels separately:
+```bash
+uv run zoo-eval run startup --task email --id 101 --level L0
+uv run zoo-eval run startup --task email --id 101 --level L1
+uv run zoo-eval run startup --task email --id 101 --level L2
+```
+
 When a task references a scene, the scene manager:
 1. Runs all `setup` actions immediately (before agent starts)
 2. Schedules `triggers` to activate during task execution
