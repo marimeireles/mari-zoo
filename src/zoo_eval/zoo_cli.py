@@ -13,6 +13,7 @@ import base64
 import os
 import re
 import subprocess
+import threading
 from contextlib import contextmanager
 from typing import Optional
 
@@ -29,7 +30,8 @@ class SeedTracker:
     """Track success/failure of seeding operations and print summary.
 
     Usage:
-        tracker = SeedTracker()
+        tracker = SeedTracker()  # Default: continue on errors
+        tracker = SeedTracker(fail_fast=True)  # Stop on first error
 
         with tracker.track("gitea", "repos"):
             gitea_create_repo(...)
@@ -45,8 +47,15 @@ class SeedTracker:
         # Seeded Gitea: 1/1 repos
     """
 
-    def __init__(self):
+    def __init__(self, fail_fast: bool = False):
+        """Initialize tracker.
+
+        Args:
+            fail_fast: If True, re-raise exceptions instead of continuing.
+                       Useful for debugging seed scripts.
+        """
         self._results: dict[tuple[str, str], dict[str, int]] = {}
+        self._fail_fast = fail_fast
 
     @contextmanager
     def track(self, category: str, item_type: str):
@@ -58,8 +67,10 @@ class SeedTracker:
         try:
             yield
             self._results[key]["success"] += 1
-        except Exception:
-            pass  # Don't re-raise, allow script to continue
+        except Exception as e:
+            if self._fail_fast:
+                raise  # Re-raise for debugging
+            # Otherwise continue silently
 
     def print_summary(self):
         """Print summary in format: Seeded Gitea: 1/1 repos, 2/2 files"""
@@ -127,14 +138,18 @@ class ZooHTTP:
         )
 
 
-# Singleton HTTP client
+# Singleton HTTP client with thread-safe initialization
 _http: Optional[ZooHTTP] = None
+_http_lock = threading.Lock()
 
 
 def _get_http() -> ZooHTTP:
     global _http
     if _http is None:
-        _http = ZooHTTP()
+        with _http_lock:
+            # Double-check after acquiring lock
+            if _http is None:
+                _http = ZooHTTP()
     return _http
 
 

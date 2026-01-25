@@ -120,6 +120,7 @@ class Trigger:
     - site: Zoo site domain (e.g., 'gitea.zoo')
     - event_category: Matomo event category (e.g., 'AJAX', 'Button', 'Form')
     - event_match: Text to match in event name (case-insensitive)
+    - timeout: Max seconds to wait for event (default: 600)
     """
 
     trigger_type: str  # "time" | "event" | "page_load"
@@ -128,6 +129,7 @@ class Trigger:
     site: str | None = None  # Zoo site domain
     event_category: str | None = None  # Matomo event category
     event_match: str | None = None  # Text to match in event name
+    timeout: float = 600.0  # Max seconds to wait for event triggers (default: 10 minutes)
 
     @classmethod
     def from_dict(cls, data: dict) -> Trigger:
@@ -137,6 +139,7 @@ class Trigger:
             site=data.get("site"),
             event_category=data.get("event_category"),
             event_match=data.get("event_match"),
+            timeout=data.get("timeout", 600.0),
         )
 
 
@@ -205,8 +208,22 @@ class Evaluation:
 
     @classmethod
     def from_dict(cls, data: dict) -> Evaluation:
+        """Parse Evaluation from a dictionary.
+
+        Raises:
+            ValueError: If eval types are invalid.
+        """
+        # Validate eval types
+        eval_types = []
+        for t in data.get("types", []):
+            try:
+                eval_types.append(EvalType(t))
+            except ValueError:
+                valid = [e.value for e in EvalType]
+                raise ValueError(f"Invalid eval type '{t}'. Valid: {valid}")
+
         return cls(
-            eval_types=[EvalType(t) for t in data.get("types", [])],
+            eval_types=eval_types,
             reference_answers=ReferenceAnswers.from_dict(data.get("answers")),
             reference_url=data.get("url") or None,
             program_html=[HTMLCheck.from_dict(h) for h in data.get("html_checks", []) or []],
@@ -316,23 +333,44 @@ class Task:
 
     @classmethod
     def from_dict(cls, data: dict) -> Task:
-        # Support both old format (task_id) and new format (id)
-        task_id = data.get("id") if "id" in data else data.get("task_id")
+        """Parse a Task from a dictionary.
+
+        Raises:
+            ValueError: If required fields are missing or invalid.
+        """
+        # Validate required fields
+        task_id = data.get("id") or data.get("task_id")
+        if task_id is None:
+            raise ValueError("Task missing required field: 'id' or 'task_id'")
+
+        if "intent" not in data:
+            raise ValueError(f"Task {task_id} missing required field: 'intent'")
 
         # Parse complexity and environment if present
         complexity = None
         if data.get("complexity"):
-            complexity = TaskComplexity(data["complexity"])
+            try:
+                complexity = TaskComplexity(data["complexity"])
+            except ValueError:
+                valid = [e.value for e in TaskComplexity]
+                raise ValueError(f"Task {task_id}: invalid complexity '{data['complexity']}'. Valid: {valid}")
 
         environment = None
         if data.get("environment"):
-            environment = Environment(data["environment"])
+            try:
+                environment = Environment(data["environment"])
+            except ValueError:
+                valid = [e.value for e in Environment]
+                raise ValueError(f"Task {task_id}: invalid environment '{data['environment']}'. Valid: {valid}")
 
         # Parse agents dict
         agents = {}
         if data.get("agents"):
             for agent_name, agent_data in data["agents"].items():
                 agents[agent_name] = TaskAgentConfig.from_dict(agent_name, agent_data)
+
+        if not agents:
+            raise ValueError(f"Task {task_id} has no agents defined. Add an 'agents' section.")
 
         return cls(
             task_id=task_id,

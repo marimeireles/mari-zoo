@@ -15,6 +15,7 @@ Tracked event types:
 """
 
 import os
+import warnings
 import requests
 from dataclasses import dataclass
 from typing import Optional
@@ -76,8 +77,20 @@ class MatomoClient:
     def __init__(self, proxy_url: Optional[str] = None, token: Optional[str] = None):
         self.proxy_url = proxy_url or os.environ.get("ZOO_PROXY_URL", "http://localhost:3128")
         self.matomo_url = "http://analytics.zoo/index.php"
-        # Default token matches the permanent token seeded in The Zoo's analytics_seed.sql
-        self.token = token or os.environ.get("MATOMO_TOKEN", "zooeval_matomo_token_permanent")
+
+        # Token resolution: explicit param > env var > default dev token
+        if token:
+            self.token = token
+        elif os.environ.get("MATOMO_TOKEN"):
+            self.token = os.environ["MATOMO_TOKEN"]
+        else:
+            # Default token matches the permanent token seeded in The Zoo's analytics_seed.sql
+            # This is for local development only - do not use in production
+            self.token = "zooeval_matomo_token_permanent"
+            warnings.warn(
+                "Using default Matomo dev token. Set MATOMO_TOKEN env var for production.",
+                stacklevel=2,
+            )
 
     def _request(self, params: dict) -> dict:
         """Make a request to Matomo API."""

@@ -160,32 +160,22 @@ This document tracks identified improvements and technical debt in the zoo-eval 
   ```
 - **Fix:** Add `fail_fast: bool = False` parameter to `__init__`
 - **Complexity:** Small
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
 
 ### 11. Add HTTP Client Thread Safety
 - **File:** `src/zoo_eval/zoo_cli.py:131-138`
 - **Issue:** TOCTOU race condition in `_get_http()` singleton
 - **Impact:** Low (mostly async code), but good hygiene
-- **Fix:** Add `threading.Lock()`:
-  ```python
-  _http_lock = threading.Lock()
-
-  def _get_http() -> ZooHTTP:
-      global _http
-      with _http_lock:
-          if _http is None:
-              _http = ZooHTTP()
-          return _http
-  ```
+- **Fix:** Add `threading.Lock()` with double-checked locking pattern
 - **Complexity:** Trivial
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
 
 ### 12. Add Matomo Token Warning
 - **File:** `src/zoo_eval/matomo.py:80`
 - **Issue:** Hardcoded dev token without prominent warning
-- **Fix:** Add logging warning when using default token
+- **Fix:** Add `warnings.warn()` when using default token
 - **Complexity:** Trivial
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
 
 ---
 
@@ -202,17 +192,22 @@ This document tracks identified improvements and technical debt in the zoo-eval 
   - No type checking
 - **Fix Options:**
   1. Use Pydantic models (cleanest, significant refactor)
-  2. Add manual validation in `from_dict()` methods
+  2. Add manual validation in `from_dict()` methods ✓
   3. Add JSON Schema validation before parsing
 - **Complexity:** Medium-Large
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
+  - Added validation to Task.from_dict() with helpful error messages
+  - Added validation to Evaluation.from_dict() for eval types
+  - Note: Full Pydantic refactor deferred for future work
 
 ### 14. Add Trigger Timeout Configuration
 - **File:** `src/zoo_eval/scenes.py:137` and `models.py`
 - **Issue:** Default 10-minute timeout not configurable
 - **Fix:** Add `timeout` field to `Trigger` dataclass
 - **Complexity:** Small
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
+  - Added `timeout: float = 600.0` field to Trigger class
+  - Updated scenes.py to use trigger.timeout instead of hardcoded value
 
 ---
 
@@ -252,25 +247,34 @@ This document tracks identified improvements and technical debt in the zoo-eval 
 - **File:** `src/zoo_eval/evaluators.py:115`
 - **Issue:** `if expected in actual:` can cause false positives
 - **Fix:** Use proper URL parsing with `urllib.parse`
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
+  - Added `urlparse` import and proper URL component matching
+  - Checks scheme, netloc, and path separately
+  - Path matching allows `/user` to match `/user/profile` but not `/users`
 
 ### 19. DBMatchEvaluator Creates New Zoo Instance Per Evaluation
 - **File:** `src/zoo_eval/evaluators.py:181`
 - **Issue:** `zoo = Zoo()` creates new instance each time
 - **Fix:** Reuse existing Zoo instance or pass as parameter
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
+  - Added `get_zoo()` singleton function to zoo.py
+  - Updated DBMatchEvaluator to use `get_zoo()` instead of `Zoo()`
 
 ### 20. CustomFunctionEvaluator Doesn't Support Async
 - **File:** `src/zoo_eval/evaluators.py:494`
 - **Issue:** Custom functions must be synchronous
 - **Fix:** Add `asyncio.iscoroutinefunction()` check and await if needed
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
+  - Added `asyncio.iscoroutinefunction()` check
+  - Awaits async custom functions, calls sync functions normally
 
 ### 21. Scene Action Concurrency
-- **File:** `src/zoo_eval/multi_agent_runner.py:439-444`
+- **File:** `src/zoo_eval/scenes.py`
 - **Issue:** Multiple agents may trigger same scene action concurrently
 - **Fix:** Add asyncio.Lock per scene action, or make actions idempotent
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
+  - Added `_action_lock = asyncio.Lock()` to SceneManager
+  - Updated `_run_actions()` to use async with lock
 
 ---
 

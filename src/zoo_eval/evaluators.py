@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from .models import Evaluation, EvalType, TaskResult
 
@@ -107,16 +108,30 @@ class URLMatchEvaluator(Evaluator):
                 details="No reference URL defined",
             )
 
-        # Normalize URLs for comparison
-        actual = result.final_url.rstrip("/").lower()
-        expected = evaluation.reference_url.rstrip("/").lower()
+        # Parse URLs for proper comparison (avoids false positives from substring matching)
+        actual_parsed = urlparse(result.final_url.lower())
+        expected_parsed = urlparse(evaluation.reference_url.lower())
 
-        # Check if expected URL pattern is in actual (GOLD in PRED)
-        if expected in actual:
+        # Normalize paths (remove trailing slashes)
+        actual_path = actual_parsed.path.rstrip("/") or "/"
+        expected_path = expected_parsed.path.rstrip("/") or "/"
+
+        # Check scheme and netloc match exactly
+        scheme_match = actual_parsed.scheme == expected_parsed.scheme
+        netloc_match = actual_parsed.netloc == expected_parsed.netloc
+
+        # Path must match exactly or actual must start with expected path + /
+        # This allows /user to match /user/profile but not /users
+        path_match = (
+            actual_path == expected_path
+            or actual_path.startswith(expected_path + "/")
+        )
+
+        if scheme_match and netloc_match and path_match:
             return EvalResult(
                 passed=True,
                 eval_type=EvalType.URL_MATCH,
-                details=f"URL contains expected: {evaluation.reference_url}",
+                details=f"URL matches expected: {evaluation.reference_url}",
             )
 
         return EvalResult(
@@ -160,7 +175,7 @@ class DBMatchEvaluator(Evaluator):
     """Evaluates agent answer against database query results."""
 
     async def evaluate(self, result: TaskResult, evaluation: Evaluation) -> EvalResult:
-        from .zoo import Zoo
+        from .zoo import get_zoo
 
         if not result.agent_answer:
             return EvalResult(
@@ -177,8 +192,8 @@ class DBMatchEvaluator(Evaluator):
                 details="No db_query defined",
             )
 
-        # Run the query
-        zoo = Zoo()
+        # Run the query (use singleton to avoid creating new Zoo per evaluation)
+        zoo = get_zoo()
         try:
             if db_query.db_type == "mysql":
                 query_result = zoo.query_mysql(db_query.query, db_query.database)
@@ -487,7 +502,13 @@ class CustomFunctionEvaluator(Evaluator):
             custom_func = getattr(module, function_name)
 
             # Call the function with result and return its EvalResult
-            eval_result = custom_func(result)
+            # Support both sync and async custom functions
+            import asyncio
+
+            if asyncio.iscoroutinefunction(custom_func):
+                eval_result = await custom_func(result)
+            else:
+                eval_result = custom_func(result)
 
             # Validate return type
             if not isinstance(eval_result, EvalResult):

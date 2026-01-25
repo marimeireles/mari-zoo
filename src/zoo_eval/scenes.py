@@ -57,6 +57,7 @@ class SceneManager:
         self.active_tasks: list[asyncio.Task] = []
         self.start_time: float | None = None
         self.actions_log: list[dict] = []  # Track all actions for verification
+        self._action_lock = asyncio.Lock()  # Prevent concurrent action execution
 
     async def load_and_activate_scene(
         self, scene_name: str, task_start_time: float
@@ -87,12 +88,17 @@ class SceneManager:
         return scene
 
     async def _run_actions(self, actions: list[ActionPayload], label: str = ""):
-        """Run a list of actions."""
-        for action in actions:
-            if action.action_type == "script":
-                if label:
-                    print(f"Running {label}: {action.script_path}")
-                await self._run_script(action)
+        """Run a list of actions.
+
+        Uses a lock to prevent concurrent execution when multiple agents
+        trigger the same scene action simultaneously.
+        """
+        async with self._action_lock:
+            for action in actions:
+                if action.action_type == "script":
+                    if label:
+                        print(f"Running {label}: {action.script_path}")
+                    await self._run_script(action)
 
     async def activate_scene(self, scene: Scene, task_start_time: float):
         """
@@ -134,7 +140,6 @@ class SceneManager:
         trigger: Trigger,
         scene: Scene,
         poll_interval: float = 3.0,
-        timeout: float = 600.0,
     ):
         """Poll Matomo for matching event, then execute actions.
 
@@ -143,10 +148,9 @@ class SceneManager:
         we query Matomo's API to detect when the event occurred.
 
         Args:
-            trigger: Event trigger with site, event_category, event_match
+            trigger: Event trigger with site, event_category, event_match, timeout
             scene: Scene to activate when event found
             poll_interval: Seconds between Matomo queries (default 3s)
-            timeout: Max seconds to wait for event (default 10 min)
         """
         if not trigger.site or not trigger.event_match:
             print(f"Event trigger missing required fields: site={trigger.site}, event_match={trigger.event_match}")
@@ -154,6 +158,7 @@ class SceneManager:
 
         matomo = get_matomo_client()
         elapsed = 0.0
+        timeout = trigger.timeout  # Use trigger's configured timeout (default 600s)
 
         while elapsed < timeout:
             event = matomo.find_event(

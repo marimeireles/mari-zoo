@@ -237,3 +237,19 @@ class Zoo:
         if self._client:
             self._client.close()
             self._client = None
+
+
+# Singleton instance
+_zoo: Zoo | None = None
+
+
+def get_zoo() -> Zoo:
+    """Get or create the Zoo client singleton.
+
+    Use this instead of Zoo() directly to avoid creating multiple instances,
+    which is wasteful since Zoo includes HTTP clients and docker compose detection.
+    """
+    global _zoo
+    if _zoo is None:
+        _zoo = Zoo()
+    return _zoo
