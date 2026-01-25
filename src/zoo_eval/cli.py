@@ -8,10 +8,14 @@ import os
 from pathlib import Path
 
 import typer
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
 
 from .models import AgentHarness, RunConfig, load_tasks, load_universe
+
+# Load .env file from current directory
+load_dotenv()
 from .results import ResultsDB, print_report
 from .runner import TaskRunner
 from .zoo import Zoo, ZooConfig

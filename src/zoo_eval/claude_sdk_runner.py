@@ -132,9 +132,8 @@ class ClaudeSDKRunner(BaseAgentRunner):
                     duration_seconds=time.time() - start_time,
                 )
 
-            # Capture final page content for PROGRAM_HTML evaluation
-            if steps > 0 and page_content is None:
-                page_content = await self._capture_page_content(options)
+            # Note: Page content capture via separate query causes SDK issues
+            # For PROGRAM_HTML evaluation, rely on the agent's final answer instead
 
             return AgentResult(
                 agent_name=agent_config.name,
@@ -161,20 +160,6 @@ class ClaudeSDKRunner(BaseAgentRunner):
                 steps=steps,
                 duration_seconds=time.time() - start_time,
             )
-
-    async def _capture_page_content(self, options: ClaudeAgentOptions) -> str | None:
-        """Capture current page content via browser_snapshot for evaluation."""
-        try:
-            async with asyncio.timeout(30):  # Short timeout for snapshot
-                async for message in query(
-                    prompt="Use browser_snapshot to capture the current page state. Return only the snapshot.",
-                    options=options,
-                ):
-                    if isinstance(message, ResultMessage):
-                        return message.result
-        except (asyncio.TimeoutError, Exception):
-            pass
-        return None
 
     async def run_multi_agent_tasks(self, tasks: list[Task]) -> list[TaskResult]:
         """Run tasks with their defined agents."""

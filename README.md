@@ -11,12 +11,12 @@ uv sync
 # Install playwright browsers
 uv run playwright install chromium
 
-# Set API keys
-export OPENROUTER_API_KEY=your-key    # Required (default uses Gemini 2.5 Flash)
-export OPENAI_API_KEY=your-key        # Required for LLM judge evaluation
-
-# Optional: Override LLM judge model (default: gpt-5)
-export OPENAI_JUDGE_MODEL=gpt-4o
+# Set API keys in .env file (auto-loaded by CLI)
+cat > .env << EOF
+OPENROUTER_API_KEY=your-key           # Required for browser-use harness (default)
+OPENAI_API_KEY=your-key               # Required for LLM judge evaluation
+ANTHROPIC_API_KEY=your-key            # Required for claude_sdk harness
+EOF
 ```
 
 ## Quick Start
@@ -81,6 +81,32 @@ uv run zoo-eval run startup --task email --id 101 --timeout 180 --max-steps 50
 
 # Resume an interrupted run
 uv run zoo-eval run startup --task email --resume
+```
+
+## Agent Harnesses
+
+Zoo-eval supports multiple agent harnesses for comparison:
+
+### browser-use (default)
+
+Uses [browser-use](https://github.com/browser-use/browser-use) with OpenRouter models:
+
+```bash
+uv run zoo-eval run startup --task simple_navigation
+uv run zoo-eval run startup --task simple_navigation --model gpt-4o
+```
+
+### Claude SDK
+
+Uses [claude-agent-sdk](https://pypi.org/project/claude-agent-sdk/) with playwright-mcp for browser automation:
+
+```bash
+# Run with Claude SDK (requires ANTHROPIC_API_KEY in .env)
+uv run zoo-eval run startup --task simple_navigation --harness claude_sdk
+
+# Use different Claude models
+uv run zoo-eval run startup --task simple_navigation --harness claude_sdk --claude-model opus
+uv run zoo-eval run startup --task simple_navigation --harness claude_sdk --claude-model haiku
 ```
 
 ## Documentation
