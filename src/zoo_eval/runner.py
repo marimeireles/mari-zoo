@@ -1,4 +1,4 @@
-"""Task runner that orchestrates browser_use agent execution."""
+"""Task runner that orchestrates agent execution."""
 
 from __future__ import annotations
 
@@ -7,12 +7,41 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .evaluators import EvalResult, evaluate_task
-from .models import RunConfig, Task, TaskResult, Universe, load_universe
-from .multi_agent_runner import MultiAgentRunner
+from .models import AgentHarness, RunConfig, Task, TaskResult, Universe, load_universe
 from .zoo import Zoo
+
+if TYPE_CHECKING:
+    from .base_agent_runner import BaseAgentRunner
+
+
+def create_agent_runner(
+    zoo: Zoo,
+    config: RunConfig,
+    universe_path: Path | None = None,
+    universe: Universe | None = None,
+) -> "BaseAgentRunner":
+    """Factory function to create the appropriate agent runner.
+
+    Args:
+        zoo: Zoo instance for environment interaction
+        config: Run configuration with harness selection
+        universe_path: Path to universe config directory
+        universe: Pre-loaded Universe object
+
+    Returns:
+        Appropriate runner instance based on config.harness
+    """
+    if config.harness == AgentHarness.CLAUDE_SDK:
+        from .claude_sdk_runner import ClaudeSDKRunner
+
+        return ClaudeSDKRunner(zoo, config, universe_path, universe)
+    else:
+        from .multi_agent_runner import MultiAgentRunner
+
+        return MultiAgentRunner(zoo, config, universe_path, universe)
 
 
 @dataclass
@@ -30,7 +59,7 @@ class RunResult:
 
 
 class TaskRunner:
-    """Runs tasks using browser_use agent."""
+    """Runs tasks using configured agent harness."""
 
     def __init__(
         self, zoo: Zoo, config: RunConfig | None = None, universe_path: Path | None = None, universe: Universe | None = None
@@ -39,14 +68,16 @@ class TaskRunner:
         self.config = config or RunConfig()
         self.universe_path = universe_path
         self.universe = universe
-        self._multi_agent_runner = None
+        self._agent_runner: "BaseAgentRunner | None" = None
 
     async def setup(self):
-        """Initialize browser_use components."""
+        """Initialize agent runner components."""
         os.environ["ANONYMIZED_TELEMETRY"] = "false"
-        # Create multi-agent runner
-        self._multi_agent_runner = MultiAgentRunner(self.zoo, self.config, self.universe_path, self.universe)
-        await self._multi_agent_runner.setup()
+        # Create agent runner based on harness config
+        self._agent_runner = create_agent_runner(
+            self.zoo, self.config, self.universe_path, self.universe
+        )
+        await self._agent_runner.setup()
 
     async def teardown(self):
         """Clean up resources."""
@@ -62,7 +93,7 @@ class TaskRunner:
             universe_name: Name of the universe (for human review file organization)
         """
         # Run all tasks
-        task_results = await self._multi_agent_runner.run_multi_agent_tasks(tasks)
+        task_results = await self._agent_runner.run_multi_agent_tasks(tasks)
 
         # Evaluate each result
         run_results = []

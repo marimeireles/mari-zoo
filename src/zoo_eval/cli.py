@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from .models import RunConfig, load_tasks, load_universe
+from .models import AgentHarness, RunConfig, load_tasks, load_universe
 from .results import ResultsDB, print_report
 from .runner import TaskRunner
 from .zoo import Zoo, ZooConfig
@@ -74,11 +75,25 @@ def run(
     judge_model: str = typer.Option(None, "--judge-model", "-j", help="LLM judge model (default: gpt-4o, auto-detects provider like --model)"),
     shared_browser: bool = typer.Option(False, "--shared-browser", help="All agents share same browser and memory"),
     level: list[str] = typer.Option(["L1"], "--level", "-L", help="Autonomy level(s) to run: L0, L1, L2 (can specify multiple)"),
+    harness: str = typer.Option("browser_use", "--harness", "-H", help="Agent harness: browser_use or claude_sdk"),
+    claude_model: str = typer.Option("sonnet", "--claude-model", help="Claude model for claude_sdk harness: opus, sonnet, haiku"),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
     db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
 ):
     """Run evaluation tasks from a universe directory."""
+    # Validate harness
+    try:
+        harness_enum = AgentHarness(harness)
+    except ValueError:
+        console.print(f"[red]Invalid harness: {harness}. Valid: browser_use, claude_sdk[/red]")
+        raise typer.Exit(1)
+
+    # Validate environment for Claude SDK
+    if harness_enum == AgentHarness.CLAUDE_SDK:
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            console.print("[red]ANTHROPIC_API_KEY environment variable required for claude_sdk harness[/red]")
+            raise typer.Exit(1)
     # Resolve universe path
     universe_path = Path(universe)
     if not universe_path.exists():
@@ -190,7 +205,8 @@ def run(
         return
 
     levels_str = ", ".join(autonomy_levels)
-    console.print(f"Run #{run_id}: Running {len(tasks)} task(s) with model={model}, levels=[{levels_str}]...")
+    model_info = claude_model if harness_enum == AgentHarness.CLAUDE_SDK else model
+    console.print(f"Run #{run_id}: Running {len(tasks)} task(s) with harness={harness}, model={model_info}, levels=[{levels_str}]...")
     if completed_pairs:
         console.print(f"  ({len(remaining_pairs)} remaining, {len(completed_pairs)} already done)")
 
@@ -203,6 +219,8 @@ def run(
         shared_browser=shared_browser,
         autonomy_levels=autonomy_levels,
         completed_pairs=completed_pairs,
+        harness=harness_enum,
+        claude_model=claude_model,
     )
     runner = TaskRunner(zoo, run_config, universe_path, universe_obj)
 

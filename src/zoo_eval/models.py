@@ -11,6 +11,13 @@ from typing import Any
 import yaml
 
 
+class AgentHarness(str, Enum):
+    """Agent execution harness."""
+
+    BROWSER_USE = "browser_use"
+    CLAUDE_SDK = "claude_sdk"
+
+
 @dataclass
 class RunConfig:
     """Configuration for task runs."""
@@ -25,6 +32,8 @@ class RunConfig:
     shared_browser: bool = False  # If True, all agents share the same browser and memory
     autonomy_levels: list[str] = field(default_factory=lambda: ["L1"])  # Which levels to run (L0, L1, L2)
     completed_pairs: set[tuple[int, str]] = field(default_factory=set)  # (task_id, level) pairs to skip (for resume)
+    harness: AgentHarness = AgentHarness.BROWSER_USE  # Which agent harness to use
+    claude_model: str = "sonnet"  # Claude model for Claude SDK harness ("opus", "sonnet", "haiku")
 
 
 class EvalType(str, Enum):
