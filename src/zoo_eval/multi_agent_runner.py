@@ -65,29 +65,9 @@ class MultiAgentRunner:
 
     def _create_llm(self):
         """Create LLM based on model config."""
-        from browser_use import ChatOpenAI
+        from .llm import create_chat_openai
 
-        model = self.config.model
-
-        # Model aliases for convenience
-        aliases = {
-            "flash": "google/gemini-2.5-flash",
-            "flash-lite": "google/gemini-2.5-flash-lite",
-            "claude": "anthropic/claude-sonnet-4",
-            "sonnet": "anthropic/claude-sonnet-4",
-        }
-        model = aliases.get(model, model)
-
-        # Use OpenRouter for non-OpenAI models
-        # TODO add options to deal with LLM providers other than OpenAIs
-        if "/" in model:
-            return ChatOpenAI(
-                model=model,
-                base_url="https://openrouter.ai/api/v1",
-                api_key=os.environ.get("OPENROUTER_API_KEY"),
-            )
-        else:
-            return ChatOpenAI(model=model)
+        return create_chat_openai(self.config.model)
 
     async def teardown(self):
         """Clean up resources."""

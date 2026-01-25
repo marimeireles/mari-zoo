@@ -70,8 +70,8 @@ def run(
     headless: bool = typer.Option(True, help="Run browser headlessly"),
     max_steps: int = typer.Option(30, help="Max steps per task"),
     timeout: int = typer.Option(120, help="Timeout in seconds per task"),
-    model: str = typer.Option("google/gemini-2.5-flash-lite", "--model", "-m", help="Model: flash, flash-lite, claude, gpt-4o, or provider/model"),
-    judge_model: str = typer.Option(None, "--judge-model", "-j", help="Model for LLM judge evaluation (default: gpt-5)"),
+    model: str = typer.Option("google/gemini-2.5-flash-lite", "--model", "-m", help="Agent model (auto-detects: '/' → OpenRouter, else OpenAI). Aliases: flash, sonnet"),
+    judge_model: str = typer.Option(None, "--judge-model", "-j", help="LLM judge model (default: gpt-4o, auto-detects provider like --model)"),
     shared_browser: bool = typer.Option(False, "--shared-browser", help="All agents share same browser and memory"),
     level: list[str] = typer.Option(["L1"], "--level", "-L", help="Autonomy level(s) to run: L0, L1, L2 (can specify multiple)"),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
@@ -79,12 +79,6 @@ def run(
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
 ):
     """Run evaluation tasks from a universe directory."""
-    import os
-
-    # Set judge model env var if provided via CLI (overrides env var)
-    if judge_model:
-        os.environ["OPENAI_JUDGE_MODEL"] = judge_model
-
     # Resolve universe path
     universe_path = Path(universe)
     if not universe_path.exists():
@@ -205,6 +199,7 @@ def run(
         max_steps=max_steps,
         timeout_seconds=timeout,
         model=model,
+        judge_model=judge_model or "gpt-4o",
         shared_browser=shared_browser,
         autonomy_levels=autonomy_levels,
         completed_pairs=completed_pairs,

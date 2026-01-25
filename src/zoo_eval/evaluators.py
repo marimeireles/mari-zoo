@@ -277,11 +277,23 @@ class DBMatchEvaluator(Evaluator):
 
 
 class LLMJudgeEvaluator(Evaluator):
-    """Uses OpenAI to verify semantic correctness of task completion."""
+    """Uses LLM to verify semantic correctness of task completion.
+
+    Auto-detects provider based on model name:
+    - Models with "/" (e.g., "google/gemini-2.5-flash") → OpenRouter
+    - Models without "/" (e.g., "gpt-4o") → OpenAI direct
+    """
+
+    def __init__(self, judge_model: str = "gpt-4o"):
+        """Initialize with judge model.
+
+        Args:
+            judge_model: Model to use for judging (auto-detects provider)
+        """
+        self.judge_model = judge_model
 
     async def evaluate(self, result: TaskResult, evaluation: Evaluation) -> EvalResult:
-        import os
-        from openai import OpenAI
+        from .llm import create_openai_client
 
         if not evaluation.llm_judge_criteria:
             return EvalResult(
@@ -297,9 +309,9 @@ class LLMJudgeEvaluator(Evaluator):
                 details="No agent answer to evaluate",
             )
 
-        # Use OpenAI to judge
+        # Use auto-detected provider for judging
         try:
-            client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+            client, model = create_openai_client(self.judge_model)
 
             # Build prompt with strict criteria-only evaluation
             criteria_text = "\n".join(f"{i+1}. {c}" for i, c in enumerate(evaluation.llm_judge_criteria))
@@ -322,7 +334,7 @@ Check each numbered criterion. Respond with JSON:
 }}"""
 
             response = client.chat.completions.create(
-                model=os.environ.get("OPENAI_JUDGE_MODEL", "gpt-5"),
+                model=model,
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
                 temperature=0,
@@ -529,7 +541,10 @@ class CustomFunctionEvaluator(Evaluator):
 
 
 def get_evaluator(
-    eval_type: EvalType, task=None, universe_name: str = "unknown"
+    eval_type: EvalType,
+    task=None,
+    universe_name: str = "unknown",
+    judge_model: str = "gpt-4o",
 ) -> Evaluator:
     """Get the appropriate evaluator for an eval type.
 
@@ -537,13 +552,14 @@ def get_evaluator(
         eval_type: Type of evaluator to create
         task: Task object (required for HUMAN_CRITIC)
         universe_name: Universe name (for HUMAN_CRITIC file organization)
+        judge_model: Model to use for LLM_JUDGE (auto-detects provider)
     """
     if eval_type == EvalType.STRING_MATCH:
         return StringMatchEvaluator()
     elif eval_type == EvalType.DB_MATCH:
         return DBMatchEvaluator()
     elif eval_type == EvalType.LLM_JUDGE:
-        return LLMJudgeEvaluator()
+        return LLMJudgeEvaluator(judge_model=judge_model)
     elif eval_type == EvalType.HUMAN_CRITIC:
         if task is None:
             raise ValueError("HumanCriticEvaluator requires task parameter")
@@ -559,6 +575,7 @@ async def evaluate_task(
     evaluation: Evaluation,
     task=None,
     universe_name: str = "unknown",
+    judge_model: str = "gpt-4o",
 ) -> list[EvalResult]:
     """Run all evaluators for a task and return results.
 
@@ -567,12 +584,15 @@ async def evaluate_task(
         evaluation: Evaluation criteria
         task: Task object (required for HUMAN_CRITIC evaluator)
         universe_name: Universe name (for file organization)
+        judge_model: Model to use for LLM_JUDGE (auto-detects provider)
     """
     results = []
 
     # Run standard evaluators
     for eval_type in evaluation.eval_types:
-        evaluator = get_evaluator(eval_type, task=task, universe_name=universe_name)
+        evaluator = get_evaluator(
+            eval_type, task=task, universe_name=universe_name, judge_model=judge_model
+        )
         result_eval = await evaluator.evaluate(result, evaluation)
         results.append(result_eval)
 
