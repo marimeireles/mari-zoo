@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "zoo-playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest",
+        "--browser",
+        "firefox",
+        "--proxy-server",
+        "localhost:3128",
+        "--ignore-https-errors"
+      ]
+    }
+  }
+}
