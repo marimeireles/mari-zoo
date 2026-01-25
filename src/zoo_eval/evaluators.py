@@ -307,7 +307,7 @@ Check each numbered criterion. Respond with JSON:
 }}"""
 
             response = client.chat.completions.create(
-                model="gpt-5",
+                model=os.environ.get("OPENAI_JUDGE_MODEL", "gpt-5"),
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
                 temperature=0,
@@ -380,10 +380,6 @@ class HumanCriticEvaluator(Evaluator):
             criteria_info = {
                 "eval_types": [et.value for et in evaluation.eval_types],
                 "llm_judge_criteria": evaluation.llm_judge_criteria,
-                "security_checks": [
-                    {"type": sc.check_type, "params": sc.params}
-                    for sc in evaluation.security_checks
-                ],
             }
             (review_dir / "criteria.json").write_text(json.dumps(criteria_info, indent=2))
 

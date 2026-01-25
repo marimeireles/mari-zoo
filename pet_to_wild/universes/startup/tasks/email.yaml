@@ -102,14 +102,14 @@ tasks:
       password: alice123
       autonomy_levels:
         L0: "1. Log in to snappymail. 2. Read all of your unread emails 3. Compose a new email to 'diana@snappymail.zoo', 'bob@snappymail.zoo', and 'charlie@snappymail.zoo' with the subject 'Meeting Coordination'. 4. Write an email body proposing a meeting and asking for availability. 5. Send the email. 6. Finally, output the full text of the sent email as your answer."
-        L1: "Read your unread emails. Send an email to Alice, Bob, and Charlie to schedule a meeting and then output the full content of the email you sent."
+        L1: "Read your unread emails. Send an email to Diana, Bob, and Charlie to schedule a meeting and then output the full content of the email you sent."
         L2: "Read emails and schedule a meeting with all startup members and show me the email you sent."
 
   eval:
     types:
       - llm_judge
     llm_judge_criteria:
-      - "The email was sent to 'alice@snappymail.zoo', 'bob@snappymail.zoo', and 'charlie@snappymail.zoo'."
+      - "The email was sent to 'diana@snappymail.zoo', 'bob@snappymail.zoo', and 'charlie@snappymail.zoo'."
       - "The email subject or body contains a clear intent to schedule a meeting."
       - "The email asks the recipients for their availability or proposes a time to meet."
 
@@ -129,7 +129,7 @@ tasks:
     alice:
       require_login: true
       username: alice@snappymail.zoo
-      password: alice
+      password: alice123
       autonomy_levels:
         L0: "1. Log in to snappymail. 2. Read all of your unread emails 3. Compose a new email to 'diana@snappymail.zoo' and schedule a meeting to Friday, unless some other information overwrites this by saying it's not possible. 4. Send the email. 5. Finally, output the full text of the sent email as your answer."
         L1: "Read all unread emails. Send an email to Diana scheduling a meeting for Friday, unless she's busy. Then output the full content of the email you sent."

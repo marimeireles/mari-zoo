@@ -26,7 +26,7 @@ This document tracks identified improvements and technical debt in the zoo-eval 
   ],
   ```
 - **Complexity:** Trivial
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
 
 ### 2. LLM Model Should Be Configurable
 - **File:** `src/zoo_eval/evaluators.py:310`
@@ -36,14 +36,14 @@ This document tracks identified improvements and technical debt in the zoo-eval 
   model=os.environ.get("OPENAI_JUDGE_MODEL", "gpt-5"),
   ```
 - **Complexity:** Trivial
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
 
 ### 3. Task 105 Wrong Password
 - **File:** `pet_to_wild/universes/startup/tasks/email.yaml:132`
 - **Issue:** Password is `alice` instead of `alice123` (inconsistent with other tasks)
 - **Fix:** Change `password: alice` to `password: alice123`
 - **Complexity:** Trivial
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
 
 ### 4. Task 104 Instruction Error
 - **File:** `pet_to_wild/universes/startup/tasks/email.yaml:105`
@@ -51,7 +51,7 @@ This document tracks identified improvements and technical debt in the zoo-eval 
 - **Fix:** Change to "send an email to Diana, Bob, and Charlie"
 - **Also fix:** Line 112 eval criteria references wrong recipients
 - **Complexity:** Trivial
-- **Status:** [ ] Not started
+- **Status:** [x] Completed (2026-01-24)
 
 ---
 
