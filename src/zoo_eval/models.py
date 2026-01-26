@@ -46,6 +46,48 @@ class EvalType(str, Enum):
     CUSTOM_FUNCTION = "custom_function"  # User-defined Python function for custom evaluation logic
 
 
+@dataclass
+class Subtask:
+    """A subtask within a compositional task for granular scoring.
+
+    Subtasks allow breaking down complex tasks into verifiable checkpoints.
+    Each subtask has a binary pass/fail, and the task score is computed as:
+    score = sum(passed_subtask_weights) / sum(all_weights)
+    """
+
+    id: str  # Unique identifier (e.g., "login", "create_fix")
+    description: str  # What this subtask verifies
+    weight: int = 1  # Importance weight (default: 1)
+    eval_type: EvalType = EvalType.LLM_JUDGE  # How to evaluate this subtask
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Subtask:
+        eval_type = EvalType.LLM_JUDGE
+        if data.get("eval_type"):
+            try:
+                eval_type = EvalType(data["eval_type"])
+            except ValueError:
+                pass  # Default to LLM_JUDGE
+        return cls(
+            id=data.get("id", ""),
+            description=data.get("description", ""),
+            weight=data.get("weight", 1),
+            eval_type=eval_type,
+        )
+
+
+@dataclass
+class SubtaskResult:
+    """Result of evaluating a single subtask."""
+
+    subtask_id: str
+    description: str
+    weight: int
+    passed: bool  # Binary pass/fail
+    evidence: str = ""  # Explanation from evaluator
+    eval_type: EvalType = EvalType.LLM_JUDGE
+
+
 class TaskComplexity(str, Enum):
     """Task complexity levels."""
 
@@ -226,7 +268,12 @@ class Scene:
 
 @dataclass
 class Evaluation:
-    """Evaluation criteria for a task."""
+    """Evaluation criteria for a task.
+
+    For compositional tasks, use `subtasks` for granular scoring.
+    If subtasks are defined, the task score is computed from subtask pass/fail.
+    If no subtasks, the existing eval_types determine a single pass/fail (score 0 or 1).
+    """
 
     eval_types: list[EvalType]
     reference_answers: ReferenceAnswers | None = None
@@ -234,7 +281,8 @@ class Evaluation:
     program_html: list[HTMLCheck] = field(default_factory=list)
     db_query: DBQuery | None = None
     llm_judge_criteria: list[str] = field(default_factory=list)
-    custom_function: str | None = None  # Path to custom evaluation function (e.g., "custom_evaluators.email_checker")
+    custom_function: str | None = None  # Path to custom evaluation function
+    subtasks: list[Subtask] = field(default_factory=list)  # For granular scoring
 
     @classmethod
     def from_dict(cls, data: dict) -> Evaluation:
@@ -252,6 +300,9 @@ class Evaluation:
                 valid = [e.value for e in EvalType]
                 raise ValueError(f"Invalid eval type '{t}'. Valid: {valid}")
 
+        # Parse subtasks
+        subtasks = [Subtask.from_dict(s) for s in data.get("subtasks", [])]
+
         return cls(
             eval_types=eval_types,
             reference_answers=ReferenceAnswers.from_dict(data.get("answers")),
@@ -260,6 +311,7 @@ class Evaluation:
             db_query=DBQuery.from_dict(data.get("db_query")),
             llm_judge_criteria=data.get("llm_judge_criteria", []),
             custom_function=data.get("custom_function"),
+            subtasks=subtasks,
         )
 
 
@@ -436,10 +488,15 @@ class AgentResult:
 
 @dataclass
 class TaskResult:
-    """Result from running a task."""
+    """Result from running a task.
+
+    Score is the primary metric (0.0-1.0), computed from subtask results.
+    If no subtasks, score is 0.0 or 1.0 based on evaluation pass/fail.
+    """
 
     task_id: int
-    success: bool
+    score: float = 0.0  # 0.0-1.0, computed from subtasks
+    subtask_results: list[SubtaskResult] = field(default_factory=list)
     agent_results: list[AgentResult] = field(default_factory=list)
     agent_answer: str | None = None  # Combined answer from all agents
     final_url: str | None = None

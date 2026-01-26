@@ -380,6 +380,22 @@ def check_inbox_loaded(result: TaskResult) -> EvalResult:
     )
 ```
 
+### 7. Subtasks (Granular Scoring)
+
+For compositional tasks, define subtasks to get a score (0.0-1.0) instead of binary pass/fail.
+
+```yaml
+eval:
+  subtasks:
+    - id: "login"
+      description: "Successfully authenticated"
+    - id: "create_fix"
+      description: "Edited file with correct implementation"
+      weight: 3
+```
+
+Each subtask's `description` is evaluated by LLM judge. The `weight` field is optional (default: 1). Score = sum(passed weights) / sum(total weights).
+
 ---
 
 ## Scenes
@@ -519,17 +535,26 @@ zoo-eval run startup --task email --model gpt-5
 
 The `--task` (`-t`) flag is required and specifies the task file name (without .yaml). Use `--id` (`-i`) to run specific task IDs.
 
+### Agent Harnesses
+
+**browser_use (default)** - Agents run concurrently (each gets its own browser):
+```bash
+zoo-eval run startup --task email --model gpt-4o
+```
+
+**claude_sdk** - Agents run sequentially (SDK limitation):
+```bash
+zoo-eval run startup --task devtools --harness claude_sdk --claude-model opus
+```
+
 ### Environment Setup
 
 ```bash
-# Required: Start The Zoo
+# Start The Zoo
 docker compose --profile '*' up -d
 
-# Optional: Set API key for LLM judge
+# API keys for your model provider and LLM judge
 export OPENAI_API_KEY=your-key
-
-# Optional: Override compose project detection
-export ZOO_COMPOSE_PROJECT_NAME=my-zoo-instance
 ```
 
 ---

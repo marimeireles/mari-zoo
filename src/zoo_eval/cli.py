@@ -235,10 +235,18 @@ def run(
             # Save and display results
             for result in results:
                 db.save_result(run_id, result)
-                status = "[green]PASS[/green]" if result.passed else "[red]FAIL[/red]"
+                score = result.score
+                if score >= 1.0:
+                    status = f"[green]{score:.2f}[/green]"
+                elif score >= 0.5:
+                    status = f"[yellow]{score:.2f}[/yellow]"
+                else:
+                    status = f"[red]{score:.2f}[/red]"
                 level = result.task_result.autonomy_level
+                subtasks = result.task_result.subtask_results
+                subtask_info = f" ({sum(1 for s in subtasks if s.passed)}/{len(subtasks)})" if subtasks else ""
                 console.print(
-                    f"  Task {result.task.task_id} ({level}): {status} ({result.task_result.duration_seconds:.1f}s)"
+                    f"  Task {result.task.task_id} ({level}): {status}{subtask_info} ({result.task_result.duration_seconds:.1f}s)"
                 )
         finally:
             await runner.teardown()

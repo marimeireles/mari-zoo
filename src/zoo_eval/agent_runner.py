@@ -291,7 +291,6 @@ class AgentRunner(BaseAgentRunner):
 
             return TaskResult(
                 task_id=task.task_id,
-                success=all_succeeded,
                 agent_results=agent_results,
                 agent_answer=combined_answer if combined_answer else None,
                 final_url=last_final_url,
@@ -402,7 +401,6 @@ class AgentRunner(BaseAgentRunner):
 
                         task_result = TaskResult(
                             task_id=task.task_id,
-                            success=all_succeeded,
                             agent_results=list(agent_results),
                             agent_answer=combined_answer if combined_answer else None,
                             final_url=last_final_url,

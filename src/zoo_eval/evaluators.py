@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-from .models import Evaluation, EvalType, TaskResult
+from .models import Evaluation, EvalType, Subtask, SubtaskResult, TaskResult
 
 
 @dataclass
@@ -396,7 +396,7 @@ class HumanCriticEvaluator(Evaluator):
             output_info = {
                 "agent_answer": result.agent_answer,
                 "final_url": result.final_url,
-                "success": result.success,
+                "score": result.score,
                 "error": result.error,
                 "steps": result.steps,
                 "duration_seconds": result.duration_seconds,
@@ -570,30 +570,109 @@ def get_evaluator(
         raise ValueError(f"Unknown eval type: {eval_type}")
 
 
+def compute_score(subtask_results: list[SubtaskResult]) -> float:
+    """Compute task score from subtask results.
+
+    Score = sum(passed_subtask_weights) / sum(all_weights)
+    Returns 0.0 if no subtasks.
+    """
+    if not subtask_results:
+        return 0.0
+
+    total_weight = sum(s.weight for s in subtask_results)
+    if total_weight == 0:
+        return 0.0
+
+    passed_weight = sum(s.weight for s in subtask_results if s.passed)
+    return passed_weight / total_weight
+
+
+def _create_evaluation_for_subtask(subtask: Subtask, parent_eval: Evaluation) -> Evaluation:
+    """Create a temporary Evaluation for a single subtask.
+
+    For LLM subtasks, the subtask description becomes the criterion.
+    For other types, inherits from parent evaluation config.
+    """
+    if subtask.eval_type == EvalType.LLM_JUDGE:
+        return Evaluation(
+            eval_types=[EvalType.LLM_JUDGE],
+            llm_judge_criteria=[subtask.description],
+        )
+    else:
+        # For other eval types, use parent evaluation's config
+        return Evaluation(
+            eval_types=[subtask.eval_type],
+            reference_answers=parent_eval.reference_answers,
+            reference_url=parent_eval.reference_url,
+            program_html=parent_eval.program_html,
+            db_query=parent_eval.db_query,
+            custom_function=parent_eval.custom_function,
+        )
+
+
 async def evaluate_task(
     result: TaskResult,
     evaluation: Evaluation,
     task=None,
     universe_name: str = "unknown",
     judge_model: str = "gpt-4o",
-) -> list[EvalResult]:
-    """Run all evaluators for a task and return results.
+) -> list[SubtaskResult]:
+    """Evaluate a task and return subtask results.
+
+    If subtasks are defined, evaluates each using its eval_type.
+    If no subtasks, runs standard eval_types as implicit subtasks.
 
     Args:
         result: Task execution result
         evaluation: Evaluation criteria
         task: Task object (required for HUMAN_CRITIC evaluator)
         universe_name: Universe name (for file organization)
-        judge_model: Model to use for LLM_JUDGE (auto-detects provider)
+        judge_model: Model to use for LLM_JUDGE
+
+    Returns:
+        List of SubtaskResult (also updates result.subtask_results and result.score)
     """
-    results = []
+    subtask_results = []
 
-    # Run standard evaluators
-    for eval_type in evaluation.eval_types:
-        evaluator = get_evaluator(
-            eval_type, task=task, universe_name=universe_name, judge_model=judge_model
-        )
-        result_eval = await evaluator.evaluate(result, evaluation)
-        results.append(result_eval)
+    if evaluation.subtasks:
+        # Evaluate each subtask using the same evaluator pattern
+        for subtask in evaluation.subtasks:
+            # Create temporary evaluation with subtask's criteria
+            subtask_eval = _create_evaluation_for_subtask(subtask, evaluation)
 
-    return results
+            # Use same evaluator as tasks
+            evaluator = get_evaluator(
+                subtask.eval_type, task=task, universe_name=universe_name, judge_model=judge_model
+            )
+            eval_result = await evaluator.evaluate(result, subtask_eval)
+
+            subtask_results.append(SubtaskResult(
+                subtask_id=subtask.id,
+                description=subtask.description,
+                weight=subtask.weight,
+                passed=eval_result.passed,
+                evidence=eval_result.details,
+                eval_type=subtask.eval_type,
+            ))
+    else:
+        # No subtasks - run standard evaluators as implicit subtasks (weight=1 each)
+        for eval_type in evaluation.eval_types:
+            evaluator = get_evaluator(
+                eval_type, task=task, universe_name=universe_name, judge_model=judge_model
+            )
+            eval_result = await evaluator.evaluate(result, evaluation)
+
+            subtask_results.append(SubtaskResult(
+                subtask_id=eval_type.value,
+                description=f"{eval_type.value} evaluation",
+                weight=1,
+                passed=eval_result.passed,
+                evidence=eval_result.details,
+                eval_type=eval_type,
+            ))
+
+    # Compute score and update result
+    result.subtask_results = subtask_results
+    result.score = compute_score(subtask_results)
+
+    return subtask_results

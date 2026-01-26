@@ -9,8 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .evaluators import EvalResult, evaluate_task
-from .models import AgentHarness, RunConfig, Task, TaskResult, Universe, load_universe
+from .evaluators import evaluate_task
+from .models import AgentHarness, RunConfig, SubtaskResult, Task, TaskResult, Universe, load_universe
 from .zoo import Zoo
 
 if TYPE_CHECKING:
@@ -50,12 +50,11 @@ class RunResult:
 
     task: Task
     task_result: TaskResult
-    eval_results: list[EvalResult] = field(default_factory=list)
 
     @property
-    def passed(self) -> bool:
-        """Task passes if all evaluations pass."""
-        return all(e.passed for e in self.eval_results)
+    def score(self) -> float:
+        """Task score (0.0-1.0) from subtask results."""
+        return self.task_result.score
 
 
 class TaskRunner:
@@ -95,23 +94,21 @@ class TaskRunner:
         # Run all tasks
         task_results = await self._agent_runner.run_tasks(tasks)
 
-        # Evaluate each result
+        # Evaluate each result (updates task_result.score and task_result.subtask_results)
         run_results = []
         for task_result in task_results:
             # Find the corresponding task
             task = next(t for t in tasks if t.task_id == task_result.task_id)
             # Get the evaluation for this specific autonomy level (falls back to default)
             evaluation = task.get_evaluation_for_level(task_result.autonomy_level)
-            # Pass task, universe_name, and judge_model to evaluators
-            eval_results = await evaluate_task(
+            # Evaluate task - this updates task_result.score and task_result.subtask_results
+            await evaluate_task(
                 task_result,
                 evaluation,
                 task=task,
                 universe_name=universe_name,
                 judge_model=self.config.judge_model,
             )
-            run_results.append(
-                RunResult(task=task, task_result=task_result, eval_results=eval_results)
-            )
+            run_results.append(RunResult(task=task, task_result=task_result))
 
         return run_results
