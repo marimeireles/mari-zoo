@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .auth import get_credentials_for_agent
 from .models import AgentResult, RunConfig, Task, TaskAgentConfig, TaskResult, Universe
 
 if TYPE_CHECKING:
@@ -64,6 +65,12 @@ class BaseAgentRunner(ABC):
         if self.universe and self.universe.sites:
             context += f"\nYou can access: {', '.join(self.universe.sites)}"
 
+        # Add credentials for this agent
+        allowed_sites = self.universe.sites if self.universe else []
+        credentials_text = get_credentials_for_agent(agent_config.name, allowed_sites)
+        if credentials_text:
+            context += f"\n\n{credentials_text}"
+
         return context
 
     def _build_full_task(
@@ -71,8 +78,7 @@ class BaseAgentRunner(ABC):
     ) -> str:
         """Build the task prompt for an agent.
 
-        Note: Agent identity/context goes in extend_system_message (see agent_runner.py).
-        Credentials are passed via sensitive_data parameter to browser-use.
+        Note: Agent identity/context and credentials go in extend_system_message.
         """
         # Use autonomy level if available, otherwise fall back to task intent
         task_instruction = agent_config.autonomy_levels.get(autonomy_level, task.intent)
