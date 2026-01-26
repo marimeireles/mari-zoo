@@ -81,6 +81,9 @@ uv run zoo-eval run startup --task email --id 101 --timeout 180 --max-steps 50
 
 # Resume an interrupted run
 uv run zoo-eval run startup --task email --resume
+
+# Skip Docker restart/reset (faster iteration when services are already running)
+uv run zoo-eval run startup --task email --id 101 --no-zoo-reset
 ```
 
 ## Agent Harnesses

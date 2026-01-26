@@ -82,6 +82,7 @@ def run(
     harness: str = typer.Option("browser_use", "--harness", "-H", help="Agent harness: browser_use or claude_sdk"),
     claude_model: str = typer.Option("sonnet", "--claude-model", help="Claude model for claude_sdk harness: opus, sonnet, haiku"),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
+    no_zoo_reset: bool = typer.Option(False, "--no-zoo-reset", help="Skip Docker restart/reset (assume services are ready)"),
     db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
 ):
@@ -225,10 +226,19 @@ def run(
         completed_pairs=completed_pairs,
         harness=harness_enum,
         claude_model=claude_model,
+        skip_zoo_reset=no_zoo_reset,
     )
     runner = TaskRunner(zoo, run_config, universe_path, universe_obj)
 
     async def execute():
+        # Suppress Claude SDK async cleanup warnings
+        def suppress_claude_sdk_errors(loop, context):
+            if "cancel scope" in str(context.get("exception", "")):
+                return  # Suppress known SDK bug
+            loop.default_exception_handler(context)
+
+        asyncio.get_event_loop().set_exception_handler(suppress_claude_sdk_errors)
+
         await runner.setup()
         try:
             console.print(f"  Running {len(tasks)} task(s)...")
@@ -247,7 +257,15 @@ def run(
         finally:
             await runner.teardown()
 
-    asyncio.run(execute())
+    # Run with error suppression for Claude SDK shutdown issues
+    try:
+        asyncio.run(execute())
+    except RuntimeError as e:
+        if "cancel scope" in str(e):
+            # Suppress known Claude SDK async cleanup bug
+            pass
+        else:
+            raise
 
     # Finish run and show report
     db.finish_run(run_id)

@@ -322,16 +322,17 @@ class MultiAgentRunner(BaseAgentRunner):
                 all_sites.update(task.sites)
             services = self.universe.get_services_for_sites(list(all_sites))
 
-        # Restart only needed services in correct order
-        self.zoo.restart(services if services else None)
+        if not self.config.skip_zoo_reset:
+            # Restart only needed services in correct order
+            self.zoo.restart(services if services else None)
 
-        # Wait for services to be healthy
-        if services:
-            self.zoo.wait_for_services(services, timeout=120, verbose=True)
+            # Wait for services to be healthy
+            if services:
+                self.zoo.wait_for_services(services, timeout=120, verbose=True)
 
-        # Reset if any task requires it
-        if any(t.require_reset for t in tasks):
-            self.zoo.reset_databases()
+            # Reset if any task requires it
+            if any(t.require_reset for t in tasks):
+                self.zoo.reset_databases()
 
         all_results = []
 

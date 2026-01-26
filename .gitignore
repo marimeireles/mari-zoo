@@ -39,6 +39,7 @@ ENV/
 .pytest_cache/
 .coverage
 htmlcov/
+.playwright-mcp/
 
 # Results
 results/

@@ -283,11 +283,19 @@ This document tracks identified improvements and technical debt in the zoo-eval 
 ### 22. No Unit Tests
 - **Issue:** Complex async code with no test coverage
 - **Priority Areas:**
-  1. Scene trigger logic
-  2. Evaluator implementations
-  3. Multi-agent coordination
-  4. Task/Scene YAML parsing
-- **Status:** [ ] Not started
+  1. Scene trigger logic ✓
+  2. Evaluator implementations ✓
+  3. Multi-agent coordination ✓
+  4. Task/Scene YAML parsing ✓
+- **Status:** [x] Completed (2026-01-25)
+  - Added pytest + pytest-asyncio to dev dependencies
+  - Created `tests/` directory with **133 tests** (1 skipped - requires API key):
+    - `test_models.py`: 48 tests for Task, Evaluation, Trigger, Scene, RunConfig parsing
+    - `test_evaluators.py`: 18 tests for StringMatch, URLMatch evaluators
+    - `test_runner.py`: 10 tests for factory function and TaskRunner
+    - `test_scenes.py`: 24 tests for SceneManager, triggers, action lock
+    - `test_base_agent_runner.py`: 21 tests for shared runner logic
+    - `test_claude_sdk_runner.py`: 15 tests for Claude SDK harness (pre-existing)
 
 ---
 

@@ -34,6 +34,7 @@ class RunConfig:
     completed_pairs: set[tuple[int, str]] = field(default_factory=set)  # (task_id, level) pairs to skip (for resume)
     harness: AgentHarness = AgentHarness.BROWSER_USE  # Which agent harness to use
     claude_model: str = "sonnet"  # Claude model for Claude SDK harness ("opus", "sonnet", "haiku")
+    skip_zoo_reset: bool = False  # If True, skip Docker restart/reset (assume services are ready)
 
 
 class EvalType(str, Enum):

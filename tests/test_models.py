@@ -2,6 +2,7 @@
 
 import pytest
 from zoo_eval.models import (
+    AgentHarness,
     Task,
     TaskAgentConfig,
     Evaluation,
@@ -14,6 +15,7 @@ from zoo_eval.models import (
     ActionPayload,
     TaskComplexity,
     Environment,
+    RunConfig,
 )
 
 
@@ -461,3 +463,72 @@ class TestTaskAgentConfigParsing:
         assert config.username == "alice@test.zoo"
         assert config.password == "secret"
         assert len(config.autonomy_levels) == 3
+
+
+class TestAgentHarness:
+    """Tests for AgentHarness enum."""
+
+    def test_browser_use_value(self):
+        """Browser use harness has correct value."""
+        assert AgentHarness.BROWSER_USE.value == "browser_use"
+
+    def test_claude_sdk_value(self):
+        """Claude SDK harness has correct value."""
+        assert AgentHarness.CLAUDE_SDK.value == "claude_sdk"
+
+    def test_harness_from_string(self):
+        """Can create harness from string value."""
+        assert AgentHarness("browser_use") == AgentHarness.BROWSER_USE
+        assert AgentHarness("claude_sdk") == AgentHarness.CLAUDE_SDK
+
+
+class TestRunConfig:
+    """Tests for RunConfig dataclass."""
+
+    def test_defaults(self):
+        """Test default values."""
+        config = RunConfig()
+        assert config.max_steps == 30
+        assert config.timeout_seconds == 120.0
+        assert config.headless is True
+        assert config.harness == AgentHarness.BROWSER_USE
+        assert config.autonomy_levels == ["L1"]
+        assert config.completed_pairs == set()
+
+    def test_custom_values(self):
+        """Test custom configuration."""
+        config = RunConfig(
+            max_steps=50,
+            timeout_seconds=300.0,
+            headless=False,
+            harness=AgentHarness.CLAUDE_SDK,
+            autonomy_levels=["L0", "L1", "L2"],
+            model="anthropic/claude-sonnet-4",
+            judge_model="gpt-4o",
+            claude_model="opus",
+        )
+        assert config.max_steps == 50
+        assert config.timeout_seconds == 300.0
+        assert config.headless is False
+        assert config.harness == AgentHarness.CLAUDE_SDK
+        assert config.autonomy_levels == ["L0", "L1", "L2"]
+        assert config.claude_model == "opus"
+
+    def test_completed_pairs_is_set(self):
+        """completed_pairs should be a set for O(1) lookup."""
+        config = RunConfig()
+        config.completed_pairs.add((1, "L0"))
+        config.completed_pairs.add((1, "L1"))
+        assert (1, "L0") in config.completed_pairs
+        assert (1, "L1") in config.completed_pairs
+        assert (1, "L2") not in config.completed_pairs
+
+    def test_skip_zoo_reset_default_false(self):
+        """skip_zoo_reset should default to False."""
+        config = RunConfig()
+        assert config.skip_zoo_reset is False
+
+    def test_skip_zoo_reset_can_be_set(self):
+        """skip_zoo_reset can be set to True."""
+        config = RunConfig(skip_zoo_reset=True)
+        assert config.skip_zoo_reset is True

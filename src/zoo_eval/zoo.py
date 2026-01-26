@@ -135,6 +135,7 @@ class Zoo:
         for stage_name, stage_services in [("core", core), ("auth", auth), ("apps", apps)]:
             if not stage_services:
                 continue
+            print(f"Restarting {stage_name} services: {', '.join(stage_services)}...")
             result = self._docker_compose("restart", *stage_services)
             if result.returncode != 0:
                 print(f"Warning: Failed to restart {stage_name} services")

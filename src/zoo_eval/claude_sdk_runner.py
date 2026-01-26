@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import time
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,10 @@ from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
     ResultMessage,
+    TextBlock,
+    ToolResultBlock,
     ToolUseBlock,
+    UserMessage,
     query,
 )
 
@@ -89,7 +93,8 @@ class ClaudeSDKRunner(BaseAgentRunner):
             prompt = self._build_full_task(agent_config, task, start_url, autonomy_level)
             prompt += (
                 "\n\nUse the browser tools to complete this task. "
-                "When done, provide your final answer."
+                "When done, use browser_snapshot to capture the final page state, "
+                "then provide your final answer."
             )
 
             # Configure the agent
@@ -98,6 +103,8 @@ class ClaudeSDKRunner(BaseAgentRunner):
                 allowed_tools=["mcp__zoo-playwright__*"],
                 model=self.config.claude_model,
                 max_turns=self.config.max_steps,
+                # Log SDK stderr for debugging
+                stderr=lambda msg: print(f"      [sdk] {msg}") if msg.strip() else None,
             )
 
             # Run the agent with proper timeout enforcement
@@ -105,22 +112,51 @@ class ClaudeSDKRunner(BaseAgentRunner):
             result_message: ResultMessage | None = None
 
             try:
+                print(f"    Agent {agent_config.name}: Starting task...")
                 async with asyncio.timeout(self.config.timeout_seconds):
-                    async for message in query(prompt=prompt, options=options):
-                        if isinstance(message, AssistantMessage):
-                            messages_log.append(message)
-                            for block in message.content:
-                                if isinstance(block, ToolUseBlock):
-                                    steps += 1
-                                    # Track URL from navigate calls
-                                    if block.name == "mcp__zoo-playwright__browser_navigate":
-                                        if hasattr(block, "input") and block.input:
-                                            final_url = block.input.get("url")
+                    # Create generator and ensure proper cleanup
+                    gen = query(prompt=prompt, options=options)
+                    try:
+                        last_tool_name = None
+                        async for message in gen:
+                            if isinstance(message, AssistantMessage):
+                                messages_log.append(message)
+                                for block in message.content:
+                                    if isinstance(block, TextBlock):
+                                        # Show agent's reasoning (truncated)
+                                        text = block.text[:200] + "..." if len(block.text) > 200 else block.text
+                                        print(f"    💭 {text}")
+                                    elif isinstance(block, ToolUseBlock):
+                                        steps += 1
+                                        last_tool_name = block.name
+                                        tool_name = block.name.replace("mcp__zoo-playwright__", "")
+                                        print(f"    [{steps}] {tool_name}")
+                                        # Track URL from navigate calls
+                                        if block.name == "mcp__zoo-playwright__browser_navigate":
+                                            if hasattr(block, "input") and block.input:
+                                                final_url = block.input.get("url")
+                                                print(f"        → {final_url}")
 
-                        elif isinstance(message, ResultMessage):
-                            result_message = message
-                            final_answer = message.result
-                            break
+                            elif isinstance(message, UserMessage):
+                                # Capture tool results (especially browser_snapshot)
+                                for block in message.content:
+                                    if isinstance(block, ToolResultBlock):
+                                        content = block.content if hasattr(block, "content") else ""
+                                        # Capture page content from snapshot
+                                        if last_tool_name and "snapshot" in last_tool_name:
+                                            page_content = content
+                                        # Also capture from any tool result as fallback
+                                        elif content and len(content) > 100:
+                                            page_content = content
+
+                            elif isinstance(message, ResultMessage):
+                                result_message = message
+                                final_answer = message.result
+                                print(f"    Agent {agent_config.name}: Done ({steps} steps)")
+                                break
+                    finally:
+                        # Explicitly close generator to avoid cancel scope issues
+                        await gen.aclose()
 
             except asyncio.TimeoutError:
                 return AgentResult(
@@ -171,16 +207,17 @@ class ClaudeSDKRunner(BaseAgentRunner):
                 all_sites.update(task.sites)
             services = self.universe.get_services_for_sites(list(all_sites))
 
-        # Restart only needed services in correct order
-        self.zoo.restart(services if services else None)
+        if not self.config.skip_zoo_reset:
+            # Restart only needed services in correct order
+            self.zoo.restart(services if services else None)
 
-        # Wait for services to be healthy
-        if services:
-            self.zoo.wait_for_services(services, timeout=120, verbose=True)
+            # Wait for services to be healthy
+            if services:
+                self.zoo.wait_for_services(services, timeout=120, verbose=True)
 
-        # Reset if any task requires it
-        if any(t.require_reset for t in tasks):
-            self.zoo.reset_databases()
+            # Reset if any task requires it
+            if any(t.require_reset for t in tasks):
+                self.zoo.reset_databases()
 
         all_results = []
 
@@ -211,6 +248,9 @@ class ClaudeSDKRunner(BaseAgentRunner):
                     # Run agents sequentially (Claude SDK shares MCP server state)
                     agent_results = []
                     for agent_config in agents:
+                        # Force cleanup between queries - SDK has async context issues
+                        gc.collect()
+                        await asyncio.sleep(2)
                         result = await self._run_single_agent(
                             agent_config, task, start_url, autonomy_level
                         )
