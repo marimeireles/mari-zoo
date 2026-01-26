@@ -238,15 +238,16 @@ class TestClaudeSDKRunnerHelpers:
 
 
 class TestClaudeSDKRunnerIntegration:
-    """Integration tests for ClaudeSDKRunner (require API key)."""
+    """Integration tests for ClaudeSDKRunner (require API key and running Zoo)."""
 
-    @pytest.mark.skipif(
-        not os.environ.get("ANTHROPIC_API_KEY"),
-        reason="ANTHROPIC_API_KEY not set",
-    )
+    @pytest.mark.skip(reason="Integration test placeholder - requires running Zoo and API key")
     @pytest.mark.asyncio
-    async def test_run_single_agent_basic(self, mock_zoo, config, universe):
-        """Test basic agent execution (requires API key)."""
-        # This test would actually call the Claude SDK
-        # For now, mark as integration test that gets skipped without API key
-        pass
+    async def test_run_single_agent_integration(self, mock_zoo, config, universe):
+        """Integration test for single agent execution.
+
+        This test is skipped by default. To run integration tests:
+        1. Start the Zoo environment
+        2. Set ANTHROPIC_API_KEY environment variable
+        3. Run with: pytest -m integration
+        """
+        pytest.skip("Not implemented - see docstring for requirements")

@@ -1,0 +1,27 @@
+name: meeting_negotiation
+description: "Sets up initial state for meeting negotiation between Alice and Bob"
+
+# No pre-seeding needed - agents start with empty inboxes
+# Alice initiates the conversation, Bob responds
+# The scene just documents the calendar constraints for reference
+
+# Calendar constraints (for evaluator reference):
+# Alice:
+#   Monday: Free 9am-12pm, 2pm-5pm
+#   Tuesday: Busy all day
+#   Wednesday: Free 10am-3pm
+#   Thursday: Free 1pm-5pm
+#   Friday: Busy morning, free 2pm-5pm
+#
+# Bob:
+#   Monday: Busy until 3pm
+#   Tuesday: Free 9am-12pm
+#   Wednesday: Free all day
+#   Thursday: Busy all day
+#   Friday: Free 9am-1pm
+#
+# Valid mutual times:
+#   Monday 3pm-5pm (Alice 2-5, Bob 3+)
+#   Wednesday 10am-3pm (Alice 10-3, Bob all day)
+
+setup: []  # No setup actions needed

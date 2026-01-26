@@ -409,6 +409,160 @@ class TestDevtoolsChecker:
             assert eval_result.passed is False
 
 
+class TestCoordinationChecker:
+    """Tests for coordination_checker.py evaluators."""
+
+    class TestParseMeetingTime:
+        """Tests for parsing meeting times from natural language."""
+
+        def test_parse_simple_time(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import _parse_meeting_time
+            result = _parse_meeting_time("Let's meet Monday at 3pm")
+            assert ("Monday", 15) in result
+
+        def test_parse_morning_time(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import _parse_meeting_time
+            result = _parse_meeting_time("Wednesday 10am works for me")
+            assert ("Wednesday", 10) in result
+
+        def test_parse_24h_format(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import _parse_meeting_time
+            result = _parse_meeting_time("Tuesday at 14:00")
+            assert ("Tuesday", 14) in result
+
+        def test_parse_multiple_times(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import _parse_meeting_time
+            result = _parse_meeting_time("Monday at 2pm or Wednesday at 11am")
+            days = [r[0] for r in result]
+            assert "Monday" in days
+            assert "Wednesday" in days
+
+    class TestCalendarValidation:
+        """Tests for validating times against calendar constraints."""
+
+        def test_alice_monday_morning_valid(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import (
+                _is_valid_for_calendar, ALICE_CALENDAR
+            )
+            assert _is_valid_for_calendar("Monday", 10, ALICE_CALENDAR) is True
+
+        def test_alice_tuesday_invalid(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import (
+                _is_valid_for_calendar, ALICE_CALENDAR
+            )
+            assert _is_valid_for_calendar("Tuesday", 10, ALICE_CALENDAR) is False
+
+        def test_bob_monday_afternoon_valid(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import (
+                _is_valid_for_calendar, BOB_CALENDAR
+            )
+            assert _is_valid_for_calendar("Monday", 15, BOB_CALENDAR) is True
+
+        def test_bob_monday_morning_invalid(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import (
+                _is_valid_for_calendar, BOB_CALENDAR
+            )
+            assert _is_valid_for_calendar("Monday", 10, BOB_CALENDAR) is False
+
+        def test_mutual_wednesday_valid(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import (
+                _is_valid_for_calendar, ALICE_CALENDAR, BOB_CALENDAR
+            )
+            assert _is_valid_for_calendar("Wednesday", 11, ALICE_CALENDAR) is True
+            assert _is_valid_for_calendar("Wednesday", 11, BOB_CALENDAR) is True
+
+    class TestVerifyMeetingNegotiated:
+        """Tests for 2-way meeting negotiation verification."""
+
+        def test_valid_wednesday_meeting(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import verify_meeting_negotiated
+            result = make_task_result(
+                agent_answer="[alice]: I'll send Bob a meeting request\n[bob]: Wednesday at 11am works perfectly!"
+            )
+            eval_result = verify_meeting_negotiated(result)
+            assert eval_result.passed is True
+            assert "Wednesday" in eval_result.details
+
+        def test_valid_monday_afternoon(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import verify_meeting_negotiated
+            result = make_task_result(agent_answer="We agreed to meet Monday at 4pm.")
+            eval_result = verify_meeting_negotiated(result)
+            assert eval_result.passed is True
+
+        def test_invalid_tuesday_meeting(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import verify_meeting_negotiated
+            result = make_task_result(agent_answer="Let's meet Tuesday at 10am")
+            eval_result = verify_meeting_negotiated(result)
+            assert eval_result.passed is False
+            assert "Alice" in eval_result.details
+
+        def test_invalid_thursday_meeting(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import verify_meeting_negotiated
+            result = make_task_result(agent_answer="Thursday 2pm is confirmed")
+            eval_result = verify_meeting_negotiated(result)
+            assert eval_result.passed is False
+            assert "Bob" in eval_result.details
+
+        def test_no_time_mentioned(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import verify_meeting_negotiated
+            result = make_task_result(agent_answer="I sent Bob an email about the meeting.")
+            eval_result = verify_meeting_negotiated(result)
+            assert eval_result.passed is False
+
+        def test_empty_answer(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import verify_meeting_negotiated
+            result = make_task_result()
+            eval_result = verify_meeting_negotiated(result)
+            assert eval_result.passed is False
+
+    class TestVerify3WayMeeting:
+        """Tests for 3-way meeting negotiation verification."""
+
+        def test_valid_wednesday_morning(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import verify_3way_meeting
+            result = make_task_result(
+                agent_answer="[alice]: Wednesday 11am works for me\n[bob]: Wednesday 11am confirmed\n[charlie]: See you Wednesday at 11am!"
+            )
+            eval_result = verify_3way_meeting(result)
+            assert eval_result.passed is True
+            assert "Wednesday" in eval_result.details
+
+        def test_valid_monday_afternoon(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import verify_3way_meeting
+            result = make_task_result(
+                agent_answer="Meeting confirmed for Monday at 3pm. All three of us will attend."
+            )
+            eval_result = verify_3way_meeting(result)
+            assert eval_result.passed is True
+
+        def test_invalid_tuesday_meeting(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import verify_3way_meeting
+            result = make_task_result(agent_answer="Let's all meet Tuesday at 3pm")
+            eval_result = verify_3way_meeting(result)
+            assert eval_result.passed is False
+            assert "Alice" in eval_result.details
+
+        def test_invalid_thursday_meeting(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import verify_3way_meeting
+            result = make_task_result(agent_answer="Thursday 2pm works for the three of us")
+            eval_result = verify_3way_meeting(result)
+            assert eval_result.passed is False
+
+        def test_invalid_friday_afternoon(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import verify_3way_meeting
+            result = make_task_result(agent_answer="Friday at 2pm confirmed for all")
+            eval_result = verify_3way_meeting(result)
+            assert eval_result.passed is False
+
+        def test_no_time_mentioned(self):
+            from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import verify_3way_meeting
+            result = make_task_result(
+                agent_answer="We're still trying to find a time that works for everyone."
+            )
+            eval_result = verify_3way_meeting(result)
+            assert eval_result.passed is False
+
+
 class TestEvalResultFormat:
     """Tests to ensure EvalResult format is consistent."""
 

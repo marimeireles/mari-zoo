@@ -378,5 +378,118 @@ def mysql(
         raise typer.Exit(1)
 
 
+@app.command()
+def benchmark(
+    universe: Path = typer.Argument(..., help="Path to universe directory"),
+    task_files: list[str] = typer.Option(..., "--task", "-t", help="Task file(s) to include"),
+    task_id: list[int] = typer.Option(None, "--id", "-i", help="Specific task IDs (optional)"),
+    model: list[str] = typer.Option(["google/gemini-2.5-flash-lite"], "--model", "-m", help="Model(s) to benchmark"),
+    harness: list[str] = typer.Option(["browser_use"], "--harness", "-H", help="Harness(es) to use"),
+    level: list[str] = typer.Option(["L1"], "--level", "-L", help="Autonomy level(s)"),
+    trials: int = typer.Option(1, "--trials", "-n", help="Trials per configuration"),
+    name: str = typer.Option(None, "--name", help="Benchmark name"),
+    output: Path = typer.Option(None, "--output", "-o", help="Output JSON file"),
+    headless: bool = typer.Option(True, help="Run headlessly"),
+    max_steps: int = typer.Option(30, help="Max steps per task"),
+    timeout: int = typer.Option(120, help="Timeout per task"),
+    judge_model: str = typer.Option("gpt-4o", "--judge-model", help="LLM judge model"),
+    proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
+):
+    """Run systematic benchmark across configurations."""
+    from .benchmark import BenchmarkConfig, BenchmarkRunner, generate_report
+
+    # Resolve universe path
+    universe_path = Path(universe)
+    if not universe_path.exists():
+        universe_path = Path("pet_to_wild/universes") / universe
+    if not universe_path.exists():
+        console.print(f"[red]Universe not found: {universe}[/red]")
+        raise typer.Exit(1)
+
+    # Check Zoo is running
+    zoo_config = ZooConfig(proxy_url=f"http://localhost:{proxy_port}")
+    zoo = Zoo(zoo_config)
+    if not zoo.is_running():
+        console.print("[red]Zoo is not running.[/red]")
+        raise typer.Exit(1)
+
+    # Validate autonomy levels
+    valid_levels = {"L0", "L1", "L2"}
+    autonomy_levels = [lvl.upper() for lvl in level]
+    invalid_levels = set(autonomy_levels) - valid_levels
+    if invalid_levels:
+        console.print(f"[red]Invalid autonomy level(s): {invalid_levels}. Valid: L0, L1, L2[/red]")
+        raise typer.Exit(1)
+
+    # Create benchmark config
+    benchmark_name = name or f"benchmark_{universe_path.name}_{len(task_files)}tasks"
+    config = BenchmarkConfig(
+        name=benchmark_name,
+        universe=str(universe_path),
+        task_files=task_files,
+        task_ids=list(task_id) if task_id else None,
+        models=list(model),
+        harnesses=list(harness),
+        autonomy_levels=autonomy_levels,
+        trials_per_config=trials,
+        max_steps=max_steps,
+        timeout_seconds=timeout,
+        headless=headless,
+        judge_model=judge_model,
+    )
+
+    # Run benchmark
+    runner = BenchmarkRunner(config, zoo)
+
+    async def execute():
+        return await runner.run(verbose=True)
+
+    results = asyncio.run(execute())
+
+    # Print summary
+    console.print("")
+    console.print(generate_report(results, format="text"))
+
+    # Save results
+    if output:
+        runner.save_results(output)
+        console.print(f"\n[green]Results saved to {output}[/green]")
+    else:
+        # Auto-save with timestamp
+        timestamp = results.started_at.replace(":", "-").replace("T", "_")[:19]
+        auto_output = Path(f"benchmark_{timestamp}.json")
+        runner.save_results(auto_output)
+        console.print(f"\n[green]Results saved to {auto_output}[/green]")
+
+
+@app.command("benchmark-report")
+def benchmark_report(
+    results_file: Path = typer.Argument(..., help="Benchmark results JSON file"),
+    format: str = typer.Option("text", "--format", "-f", help="Output format: text, markdown"),
+):
+    """Generate report from benchmark results."""
+    from .benchmark import BenchmarkConfig, BenchmarkResults, TrialResult, generate_report
+
+    if not results_file.exists():
+        console.print(f"[red]Results file not found: {results_file}[/red]")
+        raise typer.Exit(1)
+
+    with open(results_file) as f:
+        data = json.load(f)
+
+    # Reconstruct BenchmarkResults
+    config = BenchmarkConfig(**data["config"])
+    trials = [TrialResult(**t) for t in data["trials"]]
+    results = BenchmarkResults(
+        config=config,
+        trials=trials,
+        started_at=data.get("started_at", ""),
+        finished_at=data.get("finished_at", ""),
+        total_duration_seconds=data.get("total_duration_seconds", 0),
+    )
+
+    console.print(generate_report(results, format=format))
+
+
 if __name__ == "__main__":
     app()

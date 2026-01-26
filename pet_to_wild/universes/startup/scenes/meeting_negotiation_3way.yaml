@@ -1,0 +1,30 @@
+name: meeting_negotiation_3way
+description: "Sets up initial state for 3-way meeting negotiation"
+
+# Calendar constraints (for evaluator reference):
+# Alice:
+#   Monday: Free 9am-12pm, 2pm-5pm
+#   Tuesday: Busy all day
+#   Wednesday: Free 10am-3pm
+#   Thursday: Free 1pm-5pm
+#   Friday: Busy
+#
+# Bob:
+#   Monday: Busy until 3pm
+#   Tuesday: Free 9am-12pm
+#   Wednesday: Free all day
+#   Thursday: Busy all day
+#   Friday: Free 9am-1pm
+#
+# Charlie:
+#   Monday: Free 10am-4pm
+#   Tuesday: Free 2pm-5pm
+#   Wednesday: Free 9am-1pm
+#   Thursday: Busy
+#   Friday: Free all day
+#
+# Valid mutual times (all three free):
+#   Monday 3pm-4pm (Alice 2-5, Bob 3+, Charlie 10-4)
+#   Wednesday 10am-1pm (Alice 10-3, Bob all day, Charlie 9-1)
+
+setup: []

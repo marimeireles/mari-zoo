@@ -129,9 +129,9 @@ class TestSceneManagerLoadAndActivate:
 
         await manager.load_and_activate_scene("test_scene", 0.0)
 
-        # First call should be setup
+        # Setup should be called exactly once
         calls = manager._run_actions.call_args_list
-        assert len(calls) >= 1
+        assert len(calls) == 1, f"Expected setup to run exactly once, got {len(calls)} calls"
         # Check setup was called with label
         first_call = calls[0]
         assert first_call.args[1] == "setup script"
@@ -458,4 +458,8 @@ class TestSceneManagerActionLock:
 
         # Because of lock, actions should not interleave
         # One should complete before the other starts
-        assert execution_order[1] == "end_1" or execution_order[1] == "end_2"
+        # Valid orders: [start_1, end_1, start_2, end_2] or [start_2, end_2, start_1, end_1]
+        assert execution_order in [
+            ["start_1", "end_1", "start_2", "end_2"],
+            ["start_2", "end_2", "start_1", "end_1"],
+        ], f"Actions interleaved unexpectedly: {execution_order}"

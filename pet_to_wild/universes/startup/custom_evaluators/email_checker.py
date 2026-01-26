@@ -2,7 +2,7 @@
 
 from zoo_eval.evaluators import EvalResult
 from zoo_eval.models import EvalType, TaskResult
-from zoo_eval.zoo_cli import email_exists_in_folder, search_emails
+from zoo_eval.zoo_cli import check_inbox, email_exists_in_folder, search_emails
 
 
 # Structural indicators for mail UI state detection
@@ -357,8 +357,6 @@ def check_inbox_count_imap(
         password: Email password
         min_count: Minimum number of emails expected
     """
-    from zoo_eval.zoo_cli import check_inbox
-
     try:
         count = check_inbox(user, password, "INBOX")
 

@@ -1,5 +1,7 @@
 """Custom evaluators for devtools tasks (Kanban, Gitea)."""
 
+import re
+
 from zoo_eval.evaluators import EvalResult
 from zoo_eval.models import EvalType, TaskResult
 
@@ -33,13 +35,15 @@ GITEA_ISSUE_INDICATORS = [
     ("issue-created", "issue #"),
     ("issue-created", "created issue"),
     ("issue-created", "new issue"),
-    ("issue-number", "#[0-9]+"),  # Regex-like pattern for issue numbers
 ]
 
 
-def _check_indicators(content: str, indicators: list[tuple[str, str]]) -> list[str]:
+def _check_indicators(content: str | list, indicators: list[tuple[str, str]]) -> list[str]:
     """Check which indicators are present in content."""
-    content_lower = content.lower()
+    # Handle list input (e.g., from browser snapshot which returns list of strings)
+    if isinstance(content, list):
+        content = " ".join(str(item) for item in content)
+    content_lower = str(content).lower()
     return [name for name, pattern in indicators if pattern.lower() in content_lower]
 
 
@@ -125,8 +129,6 @@ def check_kanban_card_created(result: TaskResult) -> EvalResult:
 
 def check_gitea_issue_created(result: TaskResult) -> EvalResult:
     """Check if a Gitea issue was created."""
-    import re
-
     page_content = result.page_content or ""
     agent_answer = result.agent_answer or ""
     combined = page_content + " " + agent_answer
@@ -172,8 +174,6 @@ def check_gitea_issue_created(result: TaskResult) -> EvalResult:
 
 def check_pr_created(result: TaskResult) -> EvalResult:
     """Check if a pull request was created."""
-    import re
-
     page_content = result.page_content or ""
     agent_answer = result.agent_answer or ""
     combined = page_content + " " + agent_answer

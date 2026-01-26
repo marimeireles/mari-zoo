@@ -24,6 +24,9 @@ from .models import AgentResult, RunConfig, Task, TaskAgentConfig, TaskResult, U
 from .scenes import SceneManager
 from .zoo import Zoo
 
+# Delay between sequential agent runs to allow SDK async cleanup
+INTER_AGENT_DELAY_SECONDS = 5
+
 
 class ClaudeSDKRunner(BaseAgentRunner):
     """Runs tasks using Claude Agent SDK with playwright-mcp."""
@@ -110,6 +113,7 @@ class ClaudeSDKRunner(BaseAgentRunner):
             # Run the agent with proper timeout enforcement
             final_answer = None
             result_message: ResultMessage | None = None
+            last_text_block = None  # Fallback for answer if no ResultMessage
 
             try:
                 print(f"    Agent {agent_config.name}: Starting task...")
@@ -126,6 +130,8 @@ class ClaudeSDKRunner(BaseAgentRunner):
                                         # Show agent's reasoning (truncated)
                                         text = block.text[:200] + "..." if len(block.text) > 200 else block.text
                                         print(f"    💭 {text}")
+                                        # Keep track of last text for answer fallback
+                                        last_text_block = block.text
                                     elif isinstance(block, ToolUseBlock):
                                         steps += 1
                                         last_tool_name = block.name
@@ -171,11 +177,14 @@ class ClaudeSDKRunner(BaseAgentRunner):
             # Note: Page content capture via separate query causes SDK issues
             # For PROGRAM_HTML evaluation, rely on the agent's final answer instead
 
+            # Use last text block as fallback if no explicit ResultMessage
+            effective_answer = final_answer or last_text_block
+
             return AgentResult(
                 agent_name=agent_config.name,
                 agent_role=self._get_agent_role(agent_config),
                 success=result_message is not None and not result_message.is_error,
-                answer=final_answer,
+                answer=effective_answer,
                 final_url=final_url,
                 page_content=page_content,
                 steps=steps,
@@ -247,12 +256,17 @@ class ClaudeSDKRunner(BaseAgentRunner):
 
                     # Run agents sequentially (Claude SDK shares MCP server state)
                     agent_results = []
-                    for agent_config in agents:
+                    for i, agent_config in enumerate(agents):
                         # Force cleanup between queries - SDK has async context issues
                         gc.collect()
-                        await asyncio.sleep(2)
-                        result = await self._run_single_agent(
-                            agent_config, task, start_url, autonomy_level
+                        if i > 0:
+                            # Wait between agents for SDK cleanup
+                            await asyncio.sleep(INTER_AGENT_DELAY_SECONDS)
+                        # Run each agent in isolated task to prevent cancel scope leakage
+                        result = await asyncio.create_task(
+                            self._run_single_agent(
+                                agent_config, task, start_url, autonomy_level
+                            )
                         )
                         agent_results.append(result)
 
@@ -286,7 +300,7 @@ class ClaudeSDKRunner(BaseAgentRunner):
                 if scene_manager:
                     try:
                         await scene_manager.cleanup()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"  Warning: Scene cleanup failed: {e}")
 
         return all_results

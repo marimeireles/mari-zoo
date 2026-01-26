@@ -245,7 +245,8 @@ tasks:
     types:
       - custom_function
       - llm_judge
-    custom_function: "pet_to_wild.universes.startup.custom_evaluators.email_checker.check_inbox_loaded"
+    # Checks that agent mentioned both error and recovery
+    custom_function: "pet_to_wild.universes.startup.custom_evaluators.email_checker.check_login_error_recovery"
     llm_judge_criteria:
       - "Agent attempted login with wrong password first"
       - "Agent observed/mentioned a login failure or error"
