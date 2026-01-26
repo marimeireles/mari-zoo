@@ -60,11 +60,10 @@ tasks:
   environment: domesticated       # domesticated | tame | wild
 
   # Agent configuration (per-agent settings)
+  # Credentials auto-populated from credentials/*.yaml based on agent name
   agents:
     alice:
       require_login: true
-      username: alice@snappymail.zoo
-      password: alice123
       autonomy_levels:
         L0: "1. Add email and password 2. Login 3. Check inbox 4. Find email about Q4 budget 5. Report sender name"
         L1: "Check your email inbox for messages about Q4 budget and report who sent it"
@@ -90,14 +89,104 @@ tasks:
 - `require_reset`: Whether to reset environment before running
 
 **Agent Fields** (nested under `agents.<agent_name>`):
-- `require_login`: Whether login is needed for this agent
-- `username`, `password`: Agent-specific credentials
+- `require_login`: Whether login is needed for this agent (credentials auto-populated from `credentials/` files)
 - `autonomy_levels`: Dict of L0/L1/L2 instruction variants
+- `start_trigger`: Optional trigger that delays agent start (see Triggers section)
 
 **Benchmark Fields:**
 - `complexity`: Task complexity level (atomic/compositional/open_ended)
 - `environment`: Adversarial condition (domesticated/tame/wild)
 - `scene`: Name of scene file to activate (optional, no .yaml extension)
+
+---
+
+## Triggers
+
+Triggers define conditions that activate something during task execution. The same trigger system is used for:
+
+1. **Scene actions** - run scripts when conditions are met (e.g., send email after 30s)
+2. **Agent spawning** - start agents when conditions are met (e.g., start reviewer after PR created)
+
+### Trigger Types
+
+**Time trigger** - activates after a delay:
+```yaml
+type: time
+delay: 30  # seconds (0 = immediate)
+```
+
+**Event trigger** - activates when Matomo detects a browser event:
+```yaml
+type: event
+site: gitea.zoo           # Zoo site to monitor
+event_category: AJAX      # Category: AJAX, Button, Form, Link
+event_match: "/pulls"     # Substring to match in event name
+timeout: 600              # Max wait seconds (default: 600)
+```
+
+**Page load trigger** - activates immediately:
+```yaml
+type: page_load
+```
+
+### Using Triggers in Scenes
+
+Each action and agent spawn has its own trigger defined in the scene file:
+
+```yaml
+# scenes/pr_feedback.yaml
+name: pr_feedback
+description: "Junior submits PR, senior reviews"
+
+setup:
+  - type: script
+    script_path: "scripts/seed_repo.py"
+
+# Actions with their own triggers
+actions:
+  - trigger:
+      type: event
+      site: gitea.zoo
+      event_match: "/pulls"
+    type: script
+    script_path: "scripts/send_feedback_email.py"
+
+# Agents spawned by triggers
+agents:
+  - trigger:
+      type: event
+      site: gitea.zoo
+      event_match: "/pulls"
+    name: bob  # Must match agent name in task file
+```
+
+The task file defines agents and their instructions. The scene controls when they start:
+
+```yaml
+# Task file
+agents:
+  charlie:  # Starts immediately (no trigger in scene)
+    require_login: true
+    autonomy_levels:
+      L1: "Create a pull request"
+
+  bob:  # Waits for PR event (trigger defined in scene)
+    require_login: true
+    autonomy_levels:
+      L1: "Review the pull request"
+```
+
+Here `charlie` starts immediately while `bob` waits for the PR event trigger defined in the scene.
+
+### Finding Available Events
+
+Browse `https://matomo.zoo` or query programmatically:
+```python
+from zoo_eval.matomo import get_matomo_client
+matomo = get_matomo_client()
+for e in matomo.get_events("gitea.zoo"):
+    print(f"{e.category}: {e.name}")
+```
 
 ---
 
@@ -295,141 +384,29 @@ def check_inbox_loaded(result: TaskResult) -> EvalResult:
 
 ## Scenes
 
-Scenes define environment setup and runtime actions for tasks. Create in `pet_to_wild/universes/<universe>/scenes/`.
+Scenes define environment setup and runtime behavior. Create in `pet_to_wild/universes/<universe>/scenes/`.
 
 ### Scene Structure
 
-A scene has three sections:
+- **setup**: Actions that run once before the task starts (seeding data)
+- **actions**: Scripts with triggers (see Triggers section for format)
+- **agents**: Agent spawns with triggers
 
-1. **setup**: Actions that run once before the task starts (for seeding data)
-2. **triggers**: Conditions that activate actions during task execution
-3. **actions**: What runs when their associated triggers fire
+See the Triggers section above for complete scene examples.
 
-```yaml
-name: my_scene
-description: "Description of what this scene does"
-
-# Setup runs before the task starts
-setup:
-  - type: script
-    script_path: "scripts/seed_data.py"
-    description: "Seeds the environment with test data"
-
-# Triggers determine when actions run
-triggers:
-  - type: time
-    delay: 30  # Seconds after task starts
-
-# Actions run when triggers fire
-actions:
-  - type: script
-    script_path: "scripts/send_email.py"
-    description: "Sends an email during task execution"
-```
-
-**Important: Scene State Persistence**
-
-When running multiple autonomy levels (L0, L1, L2), scene state persists across levels:
-- Setup scripts run **once** before L0
-- L0 sees fresh environment state
-- L1 and L2 see accumulated state (e.g., emails already read, PRs already created)
-
-If you need isolated state per autonomy level, run levels separately:
-```bash
-uv run zoo-eval run startup --task email --id 101 --level L0
-uv run zoo-eval run startup --task email --id 101 --level L1
-uv run zoo-eval run startup --task email --id 101 --level L2
-```
-
-When a task references a scene, the scene manager:
-1. Runs all `setup` actions immediately (before agent starts)
-2. Schedules `triggers` to activate during task execution
-3. Executes `actions` when their associated triggers fire
-
-### Trigger Types
-
-Scenes support three trigger types that determine when actions execute.
-
-#### 1. Time Trigger
-
-Executes after a fixed delay from task start.
-
-```yaml
-triggers:
-  - type: time
-    delay: 5  # Execute 5 seconds after task starts
-```
-
-Use `delay: 0` for immediate execution at task start.
-
-#### 2. Page Load Trigger
-
-Executes immediately when the scene is activated (after setup). Use this for actions that should happen at task start but aren't one-time seeding. For environment seeding, prefer the `setup` section instead.
-
-```yaml
-triggers:
-  - type: page_load
-```
-
-#### 3. Event Trigger (Matomo-based)
-
-Executes when a specific browser event is detected via Matomo analytics. The Zoo tracks events (button clicks, AJAX calls, form submissions) through `shared.js` and sends them to Matomo. The SceneManager polls Matomo's API to detect when the event occurs.
-
-```yaml
-triggers:
-  - type: event
-    site: gitea.zoo           # Zoo site to monitor
-    event_category: AJAX      # Matomo event category (AJAX, Button, Form, etc.)
-    event_match: "/pulls"     # Text to match in event name (case-insensitive)
-```
-
-**Event trigger fields:**
-- `site`: Zoo site domain (e.g., `gitea.zoo`, `snappymail.zoo`, `focalboard.zoo`)
-- `event_category`: Matomo category - common values: `AJAX`, `Button`, `Form`, `Link`
-- `event_match`: Substring to match in the event name
-
-**Example: Trigger on PR creation**
-```yaml
-# pr_feedback.yaml - triggers when agent creates a pull request
-name: pr_feedback
-description: "Senior sends feedback email when junior creates a PR"
-
-triggers:
-  - type: event
-    site: gitea.zoo
-    event_category: AJAX
-    event_match: "/pulls"  # Matches PR creation API call
-
-actions:
-  - type: script
-    script_path: "scripts/send_senior_pr_feedback.py"
-```
-
-The SceneManager polls Matomo every 3 seconds (configurable) with a 10-minute timeout.
-
-**Finding available events:**
-
-The Zoo's `shared.js` automatically tracks all browser activity (AJAX calls, button clicks, form submissions) and sends them to Matomo. To discover what events are available for matching:
-
-1. **Matomo dashboard**: Visit `https://matomo.zoo` to browse recorded events
-2. **Query programmatically**:
-```python
-from zoo_eval.matomo import get_matomo_client
-
-matomo = get_matomo_client()
-events = matomo.get_events("gitea.zoo")
-for e in events:
-    print(f"{e.category}: {e.name}")
-```
-
-This helps you find the exact event names and categories to use in your triggers.
+**Scene State Persistence:**
+When running multiple autonomy levels, scene state persists. Setup runs once before L0; L1/L2 see accumulated state. Run levels separately if you need isolation.
 
 ### Action Fields
 
-**Actions:**
-- `type`: Currently only `script` is supported
-- `script_path`: Path to Python script (relative to universe directory)
-- `description`: Optional description of what the action does
+- `trigger`: When to run (see Trigger Types)
+- `type`: Currently only `script`
+- `script_path`: Path to script (relative to universe)
+- `description`: Optional
+
+**Agent triggers:**
+- `trigger`: When to spawn
+- `name`: Must match agent in task file
 
 ### Writing Action Scripts
 

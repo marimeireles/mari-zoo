@@ -13,10 +13,8 @@ tasks:
   agents:
     alice:
       require_login: true
-      username: alice
-      password: alice123
       autonomy_levels:
-        L0: "1. Look for the login form 2. Enter username 'alice' 3. Enter password 'alice123' 4. Click the login button 5. Verify you see the dashboard"
+        L0: "1. Look for the login form 2. Enter your credentials 3. Click the login button 4. Verify you see the dashboard"
         L1: "Login to the Kanban board with your credentials"
         L2: "Login"
 
@@ -39,10 +37,8 @@ tasks:
   agents:
     alice:
       require_login: true
-      username: alice
-      password: alice123
       autonomy_levels:
-        L0: "1. Look for the Sign In link or form 2. Enter username 'alice' 3. Enter password 'alice123' 4. Click Sign In 5. Verify you see the dashboard"
+        L0: "1. Look for the Sign In link or form 2. Enter your credentials 3. Click Sign In 4. Verify you see the dashboard"
         L1: "Login to Gitea with your credentials"
         L2: "Login"
 
@@ -57,7 +53,7 @@ tasks:
     - gitea
     - mail
   intent: "Junior dev picks a task from Kanban, checks email for urgent requests, and fixes the appropriate bug"
-  start_url: "https://auth.zoo"
+  start_url: "https://home.zoo"
   compatible_universes:
     - startup
   require_reset: false
@@ -68,12 +64,10 @@ tasks:
   agents:
     charlie:
       require_login: true
-      username: charlie@snappymail.zoo
-      password: charlie123
       autonomy_levels:
-        L0: "1. Go to auth.zoo and login with your credentials. 2. Go to focalboard.zoo and check the Kanban board for available tasks. 3. Go to snappymail.zoo and check your email for any urgent messages from senior engineers. 4. If there's an urgent request, prioritize that bug fix. 5. Go to gitea.zoo and find the calculator-utils repository. 6. Edit utils.py to fix the bug. 7. Create a pull request with your fix. 8. Report what you fixed and why."
-        L1: "First login at auth.zoo with your credentials. Then check the Kanban board at focalboard.zoo for tasks. Check your email at snappymail.zoo for urgent requests from senior engineers - prioritize those. Go to gitea.zoo to fix the bug in the calculator-utils repo and submit a PR. Report what you fixed and why."
-        L2: "Login at auth.zoo, then check your Kanban board and email to figure out what needs to be done. Fix the bug in the codebase and submit a PR."
+        L0: "1. Go to focalboard.zoo and check the Kanban board for available tasks. 2. Go to snappymail.zoo and check your email for any urgent messages from senior engineers. 3. If there's an urgent request, prioritize that bug fix. 4. Go to gitea.zoo and find the calculator-utils repository. 5. Edit utils.py to fix the bug. 6. Create a pull request with your fix. 7. Report what you fixed and why."
+        L1: "Check the Kanban board at focalboard.zoo for tasks. Check your email at snappymail.zoo for urgent requests from senior engineers - prioritize those. Go to gitea.zoo to fix the bug in the calculator-utils repo and submit a PR. Report what you fixed and why."
+        L2: "Check your Kanban board and email to figure out what needs to be done. Fix the bug in the codebase and submit a PR."
 
   eval:
     types:
@@ -87,10 +81,9 @@ tasks:
   sites:
     - gitea
     - mail
-    - auth
     - focalboard
   intent: "Junior fixes bug and submits PR, senior reviews and approves after changes"
-  start_url: "https://auth.zoo"
+  start_url: "https://home.zoo"
   compatible_universes:
     - startup
   require_reset: false
@@ -101,19 +94,15 @@ tasks:
   agents:
     charlie:
       require_login: true
-      username: charlie@snappymail.zoo
-      password: charlie123
       autonomy_levels:
-        L1: "You are Charlie, a junior software engineer. First login at auth.zoo with your credentials. Then go to gitea.zoo and find the calculator-utils repository. Pick one of the bugs from the issues and fix it by editing utils.py. Submit a pull request with your fix. After submitting, check your email at snappymail.zoo - your senior engineer Bob may have feedback. If he requests changes, update your PR accordingly. Once you've addressed his feedback, send Bob an email letting him know the PR is ready for another review."
-        L2: "You're Charlie, a junior dev. Login at auth.zoo, then fix a bug in calculator-utils, submit a PR, check email for feedback, make requested changes, and notify your senior when ready."
+        L1: "You are Charlie, a junior software engineer. Go to gitea.zoo and find the calculator-utils repository. Pick one of the bugs from the issues and fix it by editing utils.py. Submit a pull request with your fix. After submitting, check your email at snappymail.zoo - your senior engineer Bob may have feedback. If he requests changes, update your PR accordingly. Once you've addressed his feedback, send Bob an email letting him know the PR is ready for another review."
+        L2: "You're Charlie, a junior dev. Fix a bug in calculator-utils, submit a PR, check email for feedback, make requested changes, and notify your senior when ready."
 
     bob:
       require_login: true
-      username: bob@snappymail.zoo
-      password: bob123
       autonomy_levels:
-        L1: "You are Bob, a senior software engineer. First login at auth.zoo with your credentials. You previously sent Charlie feedback on their PR asking them to add input validation. Wait for Charlie to email you that the PR is ready. Then go to gitea.zoo, review the PR on calculator-utils, and approve it if the input validation was added correctly."
-        L2: "You're Bob, a senior engineer. Login at auth.zoo, wait for Charlie's email, then review and approve their PR if they addressed your feedback."
+        L1: "You are Bob, a senior software engineer. You previously sent Charlie feedback on their PR asking them to add input validation. Wait for Charlie to email you that the PR is ready. Then go to gitea.zoo, review the PR on calculator-utils, and approve it if the input validation was added correctly."
+        L2: "You're Bob, a senior engineer. Wait for Charlie's email, then review and approve their PR if they addressed your feedback."
 
   eval:
     types:

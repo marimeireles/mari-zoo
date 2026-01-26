@@ -102,6 +102,6 @@ class BaseAgentRunner(ABC):
         pass
 
     @abstractmethod
-    async def run_multi_agent_tasks(self, tasks: list[Task]) -> list[TaskResult]:
+    async def run_tasks(self, tasks: list[Task]) -> list[TaskResult]:
         """Run tasks with their defined agents."""
         pass

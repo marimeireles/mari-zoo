@@ -7,15 +7,22 @@ setup:
     script_path: "scripts/seed_junior_dev.py"
     description: "Create Gitea repo with buggy code and issues"
 
-# Triggers run during task execution
-triggers:
-  - type: event
-    site: gitea.zoo
-    event_category: AJAX
-    event_match: "/pulls"  # Matches PR creation API call
-
-# Actions run when triggers fire (when PR is submitted)
+# Actions with their own triggers
 actions:
-  - type: script
+  - trigger:
+      type: event
+      site: gitea.zoo
+      event_category: AJAX
+      event_match: "/pulls"
+    type: script
     script_path: "scripts/send_senior_pr_feedback.py"
     description: "Senior sends email asking for input validation"
+
+# Agents spawned by triggers
+agents:
+  - trigger:
+      type: event
+      site: gitea.zoo
+      event_category: AJAX
+      event_match: "/pulls"
+    name: bob

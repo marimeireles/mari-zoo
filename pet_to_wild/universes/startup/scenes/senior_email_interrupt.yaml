@@ -7,13 +7,11 @@ setup:
     script_path: "scripts/seed_junior_dev.py"
     description: "Create Gitea repo with buggy code and Kanban board with tasks"
 
-# Triggers run during task execution
-triggers:
-  - type: time
-    delay: 60
-
-# Actions run when triggers fire
+# Actions with their own triggers
 actions:
-  - type: script
+  - trigger:
+      type: time
+      delay: 60
+    type: script
     script_path: "scripts/send_senior_urgent_email.py"
     description: "Senior sends urgent email about is_even bug in production"

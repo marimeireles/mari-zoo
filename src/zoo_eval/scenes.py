@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from .models import Scene, Trigger, ActionPayload, load_scene
+from .models import Scene, Trigger, ActionPayload, AgentTrigger, load_scene
 from .matomo import get_matomo_client
 
 if TYPE_CHECKING:
@@ -58,6 +58,33 @@ class SceneManager:
         self.start_time: float | None = None
         self.actions_log: list[dict] = []  # Track all actions for verification
         self._action_lock = asyncio.Lock()  # Prevent concurrent action execution
+        self._scene: Scene | None = None  # Current active scene
+
+    def get_agent_triggers(self) -> list[AgentTrigger]:
+        """Get agent triggers from the active scene."""
+        if self._scene is None:
+            return []
+        return self._scene.agents
+
+    async def wait_for_agent_start(self, agent_name: str) -> bool:
+        """Wait until the given agent should start.
+
+        Args:
+            agent_name: Name of the agent (must match task agent config)
+
+        Returns:
+            True when agent should start, False if trigger timed out
+        """
+        if self._scene is None:
+            return True  # No scene = start immediately
+
+        # Check if this agent has a trigger in the scene
+        for agent_trigger in self._scene.agents:
+            if agent_trigger.name == agent_name:
+                return await self.wait_for_trigger(agent_trigger.trigger)
+
+        # No trigger for this agent = start immediately
+        return True
 
     async def load_and_activate_scene(
         self, scene_name: str, task_start_time: float
@@ -79,6 +106,7 @@ class SceneManager:
             raise FileNotFoundError(f"Scene file not found: {scene_path}")
 
         scene = load_scene(scene_path)
+        self._scene = scene  # Store for agent trigger queries
 
         # Run setup actions first (before task starts)
         await self._run_actions(scene.setup, "setup script")
@@ -102,7 +130,7 @@ class SceneManager:
 
     async def activate_scene(self, scene: Scene, task_start_time: float):
         """
-        Activate scene based on its triggers.
+        Activate scene based on per-action triggers.
 
         Args:
             scene: Scene to activate
@@ -110,72 +138,83 @@ class SceneManager:
         """
         self.start_time = task_start_time
 
-        for trigger in scene.triggers:
-            if trigger.trigger_type == "time":
-                if trigger.delay == 0:
-                    # Immediate action - await it directly
-                    await self._run_actions(scene.actions)
+        # Each action has its own trigger
+        for action in scene.actions:
+            if action.trigger is None:
+                # No trigger = run immediately
+                await self._run_single_action(action)
+            elif action.trigger.trigger_type == "time":
+                if action.trigger.delay == 0:
+                    await self._run_single_action(action)
                 else:
-                    # Schedule delayed action
-                    task = asyncio.create_task(self._schedule_time_trigger(trigger, scene))
+                    task = asyncio.create_task(self._schedule_action(action))
                     self.active_tasks.append(task)
-            elif trigger.trigger_type == "event":
-                # Poll Matomo for matching event
-                task = asyncio.create_task(self._schedule_event_trigger(trigger, scene))
+            elif action.trigger.trigger_type == "event":
+                task = asyncio.create_task(self._schedule_action(action))
                 self.active_tasks.append(task)
-            elif trigger.trigger_type == "page_load":
-                # Run immediately (before agent navigates)
-                await self._run_actions(scene.actions)
+            elif action.trigger.trigger_type == "page_load":
+                await self._run_single_action(action)
 
-    async def _schedule_time_trigger(self, trigger: Trigger, scene: Scene):
-        """Wait for delay, then execute actions."""
-        if trigger.delay is None:
-            return
+    async def _schedule_action(self, action: ActionPayload):
+        """Wait for action's trigger, then execute it."""
+        if action.trigger and await self.wait_for_trigger(action.trigger):
+            await self._run_single_action(action)
 
-        await asyncio.sleep(trigger.delay)
-        await self._run_actions(scene.actions)
+    async def _run_single_action(self, action: ActionPayload):
+        """Run a single action."""
+        async with self._action_lock:
+            if action.action_type == "script":
+                await self._run_script(action)
 
-    async def _schedule_event_trigger(
+    async def wait_for_trigger(
         self,
         trigger: Trigger,
-        scene: Scene,
         poll_interval: float = 3.0,
-    ):
-        """Poll Matomo for matching event, then execute actions.
-
-        We poll Matomo repeatedly because it doesn't support push notifications.
-        The browser tracks events via shared.js and sends them to Matomo, then
-        we query Matomo's API to detect when the event occurred.
+    ) -> bool:
+        """Wait for a trigger condition to be met.
 
         Args:
-            trigger: Event trigger with site, event_category, event_match, timeout
-            scene: Scene to activate when event found
-            poll_interval: Seconds between Matomo queries (default 3s)
+            trigger: Trigger specification
+            poll_interval: Seconds between Matomo queries for event triggers
+
+        Returns:
+            True if trigger fired, False if timeout
         """
-        if not trigger.site or not trigger.event_match:
-            print(f"Event trigger missing required fields: site={trigger.site}, event_match={trigger.event_match}")
-            return
+        if trigger.trigger_type == "time":
+            if trigger.delay and trigger.delay > 0:
+                await asyncio.sleep(trigger.delay)
+            return True
 
-        matomo = get_matomo_client()
-        elapsed = 0.0
-        timeout = trigger.timeout  # Use trigger's configured timeout (default 600s)
+        elif trigger.trigger_type == "page_load":
+            return True
 
-        while elapsed < timeout:
-            event = matomo.find_event(
-                site=trigger.site,
-                category=trigger.event_category,
-                name_contains=trigger.event_match,
-            )
+        elif trigger.trigger_type == "event":
+            if not trigger.site or not trigger.event_match:
+                print(f"Event trigger missing required fields: site={trigger.site}, event_match={trigger.event_match}")
+                return False
 
-            if event:
-                print(f"Event trigger matched: {event.category}/{event.name}")
-                await self._run_actions(scene.actions)
-                return
+            matomo = get_matomo_client()
+            elapsed = 0.0
+            timeout = trigger.timeout
 
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
+            while elapsed < timeout:
+                event = matomo.find_event(
+                    site=trigger.site,
+                    category=trigger.event_category,
+                    name_contains=trigger.event_match,
+                )
 
-        print(f"Event trigger timeout: no match for {trigger.event_category}/{trigger.event_match} on {trigger.site}")
+                if event:
+                    print(f"Trigger matched: {event.category}/{event.name}")
+                    return True
+
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+
+            print(f"Trigger timeout: no match for {trigger.event_category}/{trigger.event_match} on {trigger.site}")
+            return False
+
+        return False
 
     async def _run_script(self, action: ActionPayload):
         """

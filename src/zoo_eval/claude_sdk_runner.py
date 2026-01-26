@@ -176,7 +176,7 @@ class ClaudeSDKRunner(BaseAgentRunner):
             pass
         return None
 
-    async def run_multi_agent_tasks(self, tasks: list[Task]) -> list[TaskResult]:
+    async def run_tasks(self, tasks: list[Task]) -> list[TaskResult]:
         """Run tasks with their defined agents."""
         # Collect all sites needed by tasks
         services = []
@@ -223,13 +223,23 @@ class ClaudeSDKRunner(BaseAgentRunner):
                         print(f"  Skipping task {task.task_id} {autonomy_level} (already completed)")
                         continue
 
-                    # Run agents sequentially (Claude SDK shares MCP server state)
-                    agent_results = []
-                    for agent_config in agents:
-                        result = await self._run_single_agent(
-                            agent_config, task, start_url, autonomy_level
-                        )
-                        agent_results.append(result)
+                    # SceneManager handles trigger logic for agents
+                    async def run_agent(agent_config: TaskAgentConfig) -> AgentResult:
+                        # SceneManager decides when agent should start (immediate or after trigger)
+                        if scene_manager:
+                            should_start = await scene_manager.wait_for_agent_start(agent_config.name)
+                            if not should_start:
+                                return AgentResult(
+                                    agent_name=agent_config.name,
+                                    agent_role=self._get_agent_role(agent_config),
+                                    success=False,
+                                    error=f"Start trigger timed out for agent {agent_config.name}",
+                                    duration_seconds=0.0,
+                                )
+                        return await self._run_single_agent(agent_config, task, start_url, autonomy_level)
+
+                    # Run all agents concurrently (SceneManager handles timing)
+                    agent_results = await asyncio.gather(*[run_agent(a) for a in agents])
 
                     # Aggregate results
                     all_succeeded = all(r.success for r in agent_results)

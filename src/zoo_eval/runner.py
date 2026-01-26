@@ -39,9 +39,9 @@ def create_agent_runner(
 
         return ClaudeSDKRunner(zoo, config, universe_path, universe)
     else:
-        from .multi_agent_runner import MultiAgentRunner
+        from .agent_runner import AgentRunner
 
-        return MultiAgentRunner(zoo, config, universe_path, universe)
+        return AgentRunner(zoo, config, universe_path, universe)
 
 
 @dataclass
@@ -93,7 +93,7 @@ class TaskRunner:
             universe_name: Name of the universe (for human review file organization)
         """
         # Run all tasks
-        task_results = await self._agent_runner.run_multi_agent_tasks(tasks)
+        task_results = await self._agent_runner.run_tasks(tasks)
 
         # Evaluate each result
         run_results = []

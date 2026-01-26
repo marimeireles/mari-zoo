@@ -165,13 +165,33 @@ class ActionPayload:
     action_type: str  # "script"
     script_path: str = ""  # Path to Python script to execute
     description: str = ""  # Optional description of the action
+    trigger: Trigger | None = None  # When this action should run
 
     @classmethod
     def from_dict(cls, data: dict) -> ActionPayload:
+        trigger = None
+        if data.get("trigger"):
+            trigger = Trigger.from_dict(data["trigger"])
         return cls(
             action_type=data.get("type", "script"),
             script_path=data.get("script_path", ""),
             description=data.get("description", ""),
+            trigger=trigger,
+        )
+
+
+@dataclass
+class AgentTrigger:
+    """Defines when an agent should be spawned during a scene."""
+
+    name: str  # Agent name (must match agent defined in task)
+    trigger: Trigger  # When to spawn this agent
+
+    @classmethod
+    def from_dict(cls, data: dict) -> AgentTrigger:
+        return cls(
+            name=data.get("name", ""),
+            trigger=Trigger.from_dict(data.get("trigger", {})),
         )
 
 
@@ -181,15 +201,15 @@ class Scene:
 
     Scenes define what happens before and during a task:
     - setup: Actions that run before the task starts (seeding data)
-    - triggers: Conditions that activate actions during execution
-    - actions: What runs when triggers fire
+    - actions: Scripts with their own triggers that run during execution
+    - agents: Agent spawns with their own triggers
     """
 
     name: str
     description: str = ""
     setup: list[ActionPayload] = field(default_factory=list)
-    triggers: list[Trigger] = field(default_factory=list)
     actions: list[ActionPayload] = field(default_factory=list)
+    agents: list[AgentTrigger] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict | None) -> Scene | None:
@@ -199,8 +219,8 @@ class Scene:
             name=data.get("name", ""),
             description=data.get("description", ""),
             setup=[ActionPayload.from_dict(s) for s in data.get("setup", [])],
-            triggers=[Trigger.from_dict(t) for t in data.get("triggers", [])],
             actions=[ActionPayload.from_dict(a) for a in data.get("actions", [])],
+            agents=[AgentTrigger.from_dict(ag) for ag in data.get("agents", [])],
         )
 
 

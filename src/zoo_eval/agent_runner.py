@@ -1,4 +1,4 @@
-"""Multi-agent task runner for concurrent agent execution using browser-use."""
+"""Agent task runner for browser-use harness."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ from .scenes import SceneManager
 from .zoo import Zoo
 
 
-class MultiAgentRunner(BaseAgentRunner):
-    """Runs tasks with multiple concurrent agents using browser-use."""
+class AgentRunner(BaseAgentRunner):
+    """Runs tasks using browser-use. Supports single and multi-agent execution."""
 
     def __init__(
         self,
@@ -310,7 +310,7 @@ class MultiAgentRunner(BaseAgentRunner):
                 except Exception:
                     pass
 
-    async def run_multi_agent_tasks(
+    async def run_tasks(
         self, tasks: list[Task]
     ) -> list[TaskResult]:
         """Run tasks with their defined agents."""
@@ -370,12 +370,23 @@ class MultiAgentRunner(BaseAgentRunner):
                         all_results.append(result)
                     else:
                         # Separate browsers: run each agent in its own browser concurrently
-                        async def run_single_agent_task(agent_config: TaskAgentConfig) -> AgentResult:
+                        # SceneManager handles trigger logic for agents
+
+                        async def run_agent(agent_config: TaskAgentConfig) -> AgentResult:
+                            # SceneManager decides when agent should start (immediate or after trigger)
+                            if scene_manager:
+                                should_start = await scene_manager.wait_for_agent_start(agent_config.name)
+                                if not should_start:
+                                    return AgentResult(
+                                        agent_name=agent_config.name,
+                                        agent_role="",
+                                        success=False,
+                                        error=f"Start trigger timed out for agent {agent_config.name}",
+                                        duration_seconds=0.0,
+                                    )
                             return await self._run_single_agent(agent_config, task, start_url, autonomy_level)
 
-                        agent_results = await asyncio.gather(
-                            *[run_single_agent_task(agent) for agent in agents]
-                        )
+                        agent_results = await asyncio.gather(*[run_agent(a) for a in agents])
 
                         # Aggregate into TaskResult
                         all_succeeded = all(r.success for r in agent_results)
