@@ -28,6 +28,7 @@ services:
     - postgres
     - mysql
     - redis
+    - analytics-zoo
 
 agents:
   - role: cofounder

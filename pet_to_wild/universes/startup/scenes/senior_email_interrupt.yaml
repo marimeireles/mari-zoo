@@ -6,12 +6,6 @@ setup:
   - type: script
     script_path: "scripts/seed_junior_dev.py"
     description: "Create Gitea repo with buggy code and Kanban board with tasks"
-
-# Actions with their own triggers
-actions:
-  - trigger:
-      type: time
-      delay: 60
-    type: script
+  - type: script
     script_path: "scripts/send_senior_urgent_email.py"
     description: "Senior sends urgent email about is_even bug in production"

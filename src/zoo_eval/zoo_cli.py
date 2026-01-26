@@ -305,6 +305,67 @@ def gitea_create_issue(
     return resp.json()
 
 
+def gitea_list_issues(
+    username: str,
+    password: str,
+    owner: str,
+    repo: str,
+) -> list[dict]:
+    """
+    List issues in a Gitea repository.
+
+    Args:
+        username: Authenticated user's username
+        password: Authenticated user's password
+        owner: Repository owner
+        repo: Repository name
+
+    Returns:
+        List of issue data
+    """
+    http = _get_http()
+    resp = http.request(
+        "GET",
+        f"{GITEA_BASE}/repos/{owner}/{repo}/issues",
+        auth=(username, password),
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def gitea_create_comment(
+    username: str,
+    password: str,
+    owner: str,
+    repo: str,
+    issue_number: int,
+    body: str,
+) -> dict:
+    """
+    Create a comment on a Gitea issue.
+
+    Args:
+        username: Authenticated user's username
+        password: Authenticated user's password
+        owner: Repository owner
+        repo: Repository name
+        issue_number: Issue number to comment on
+        body: Comment body
+
+    Returns:
+        Created comment data
+    """
+    http = _get_http()
+    resp = http.request(
+        "POST",
+        f"{GITEA_BASE}/repos/{owner}/{repo}/issues/{issue_number}/comments",
+        auth=(username, password),
+        json={"body": body},
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 # =============================================================================
 # Focalboard (Kanban) API
 # =============================================================================

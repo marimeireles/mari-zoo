@@ -74,12 +74,16 @@ class AgentRunner(BaseAgentRunner):
             allowed_sites = self.universe.sites if self.universe else []
             sensitive_data = get_sensitive_data_for_agent(agent_config.name, allowed_sites)
 
+            # Build system message with agent identity and allowed sites
+            agent_context = self._build_agent_context(agent_config)
+
             # Create agent
             agent = Agent(
                 task=full_task,
                 llm=self._llm,
                 browser=browser,
                 sensitive_data=sensitive_data if sensitive_data else None,
+                extend_system_message=agent_context,
             )
 
             # Closure to capture page HTML at each step
@@ -196,12 +200,16 @@ class AgentRunner(BaseAgentRunner):
                     allowed_sites = self.universe.sites if self.universe else []
                     sensitive_data = get_sensitive_data_for_agent(agent_config.name, allowed_sites)
 
+                    # Build system message with agent identity and allowed sites
+                    agent_context = self._build_agent_context(agent_config)
+
                     # Create agent with shared browser
                     agent = Agent(
                         task=full_task,
                         llm=self._llm,
                         browser=browser,
                         sensitive_data=sensitive_data if sensitive_data else None,
+                        extend_system_message=agent_context,
                     )
 
                     # Closure to capture page HTML at each step

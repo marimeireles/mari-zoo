@@ -531,6 +531,9 @@ zoo-eval run startup --task email --id 101 --no-headless
 
 # Use a specific model
 zoo-eval run startup --task email --model gpt-5
+
+# Increase max steps for complex tasks (default: 30)
+zoo-eval run startup --task devtools --max-steps 60
 ```
 
 The `--task` (`-t`) flag is required and specifies the task file name (without .yaml). Use `--id` (`-i`) to run specific task IDs.

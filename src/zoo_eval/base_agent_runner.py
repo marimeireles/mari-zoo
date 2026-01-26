@@ -69,18 +69,15 @@ class BaseAgentRunner(ABC):
     def _build_full_task(
         self, agent_config: TaskAgentConfig, task: Task, start_url: str, autonomy_level: str
     ) -> str:
-        """Build the full task prompt for an agent.
+        """Build the task prompt for an agent.
 
-        Note: Credentials are passed via sensitive_data parameter to browser-use,
-        not embedded in the prompt. The agent will see placeholders and use
-        <secret>username</secret> / <secret>password</secret> to fill forms.
+        Note: Agent identity/context goes in extend_system_message (see agent_runner.py).
+        Credentials are passed via sensitive_data parameter to browser-use.
         """
-        agent_context = self._build_agent_context(agent_config)
-
         # Use autonomy level if available, otherwise fall back to task intent
         task_instruction = agent_config.autonomy_levels.get(autonomy_level, task.intent)
 
-        return f"{agent_context}\n\nGo to {start_url}. {task_instruction}"
+        return f"Go to {start_url}. {task_instruction}"
 
     @abstractmethod
     async def setup(self):
