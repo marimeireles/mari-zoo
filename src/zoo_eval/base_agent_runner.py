@@ -66,23 +66,21 @@ class BaseAgentRunner(ABC):
 
         return context
 
-    def _build_login_hint(self, agent_config: TaskAgentConfig) -> str:
-        """Build login hint from agent's credentials."""
-        if agent_config.require_login and agent_config.username and agent_config.password:
-            return f"Login with username '{agent_config.username}' and password '{agent_config.password}'. "
-        return ""
-
     def _build_full_task(
         self, agent_config: TaskAgentConfig, task: Task, start_url: str, autonomy_level: str
     ) -> str:
-        """Build the full task prompt for an agent."""
+        """Build the full task prompt for an agent.
+
+        Note: Credentials are passed via sensitive_data parameter to browser-use,
+        not embedded in the prompt. The agent will see placeholders and use
+        <secret>username</secret> / <secret>password</secret> to fill forms.
+        """
         agent_context = self._build_agent_context(agent_config)
-        login_hint = self._build_login_hint(agent_config)
 
         # Use autonomy level if available, otherwise fall back to task intent
         task_instruction = agent_config.autonomy_levels.get(autonomy_level, task.intent)
 
-        return f"{agent_context}\n\nGo to {start_url}. {login_hint}{task_instruction}"
+        return f"{agent_context}\n\nGo to {start_url}. {task_instruction}"
 
     @abstractmethod
     async def setup(self):

@@ -13,6 +13,7 @@ class Credential:
     """Login credential for a site."""
     username: str
     password: str
+    agent: str = ""  # Maps to universe agent name (e.g., "alice")
     note: str = ""
 
 
@@ -66,6 +67,7 @@ def load_credentials(credentials_dir: Path | None = None) -> dict[str, SiteCrede
                 Credential(
                     username=u["username"],
                     password=u["password"],
+                    agent=u.get("agent", ""),
                     note=u.get("note", ""),
                 )
                 for u in cred_data
@@ -125,3 +127,40 @@ def get_login_hint(sites: list[str]) -> str:
     if hints:
         return ". ".join(hints) + ". "
     return ""
+
+
+def get_sensitive_data_for_agent(
+    agent_name: str,
+    allowed_sites: list[str]
+) -> dict[str, dict[str, str]]:
+    """Build browser-use sensitive_data dict for an agent.
+
+    Returns credentials scoped by domain. The agent will see placeholders
+    like ['username', 'password'] and can use <secret>username</secret> to
+    fill in the actual values.
+
+    Args:
+        agent_name: Universe agent name (e.g., "alice")
+        allowed_sites: List of site domains the agent can access
+
+    Returns:
+        Dict in format: {"snappymail.zoo": {"username": "...", "password": "..."}}
+    """
+    creds = load_credentials()
+    sensitive_data: dict[str, dict[str, str]] = {}
+
+    for site in allowed_sites:
+        domain = SITE_TO_DOMAIN.get(site, site)
+        site_creds = creds.get(domain)
+        if not site_creds:
+            continue
+
+        for cred in site_creds.users:
+            if cred.agent == agent_name:
+                sensitive_data[domain] = {
+                    "username": cred.username,
+                    "password": cred.password,
+                }
+                break
+
+    return sensitive_data

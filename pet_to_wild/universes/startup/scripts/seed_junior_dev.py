@@ -23,7 +23,7 @@ def add(a: int, b: int) -> int:
 
 def subtract(a: int, b: int) -> int:
     """Subtract b from a."""
-    return a + b  # BUG: should be a - b
+    return a + b
 
 
 def multiply(a: int, b: int) -> int:
@@ -33,12 +33,12 @@ def multiply(a: int, b: int) -> int:
 
 def divide(a: int, b: int) -> float:
     """Divide a by b."""
-    return a / b  # BUG: no zero division check
+    return a / b
 
 
 def is_even(n: int) -> bool:
     """Check if a number is even."""
-    return n % 2 == 1  # BUG: should be == 0
+    return n % 2 == 1
 
 
 def factorial(n: int) -> int:
@@ -46,7 +46,7 @@ def factorial(n: int) -> int:
     if n <= 0:
         return 1
     result = 1
-    for i in range(1, n):  # BUG: should be range(1, n + 1)
+    for i in range(1, n):
         result *= i
     return result
 '''

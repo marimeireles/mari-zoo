@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .auth import get_sensitive_data_for_agent
 from .base_agent_runner import BaseAgentRunner
 from .models import AgentResult, RunConfig, Task, TaskAgentConfig, TaskResult, Universe
 from .scenes import SceneManager
@@ -69,11 +70,16 @@ class AgentRunner(BaseAgentRunner):
             # Build task prompt using shared method
             full_task = self._build_full_task(agent_config, task, start_url, autonomy_level)
 
+            # Build sensitive_data for credentials
+            allowed_sites = self.universe.sites if self.universe else []
+            sensitive_data = get_sensitive_data_for_agent(agent_config.name, allowed_sites)
+
             # Create agent
             agent = Agent(
                 task=full_task,
                 llm=self._llm,
                 browser=browser,
+                sensitive_data=sensitive_data if sensitive_data else None,
             )
 
             # Closure to capture page HTML at each step
@@ -186,11 +192,16 @@ class AgentRunner(BaseAgentRunner):
                     # Build task prompt using shared method
                     full_task = self._build_full_task(agent_config, task, start_url, autonomy_level)
 
+                    # Build sensitive_data for credentials
+                    allowed_sites = self.universe.sites if self.universe else []
+                    sensitive_data = get_sensitive_data_for_agent(agent_config.name, allowed_sites)
+
                     # Create agent with shared browser
                     agent = Agent(
                         task=full_task,
                         llm=self._llm,
                         browser=browser,
+                        sensitive_data=sensitive_data if sensitive_data else None,
                     )
 
                     # Closure to capture page HTML at each step
