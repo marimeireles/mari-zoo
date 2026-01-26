@@ -1,0 +1,35 @@
+name: personal_assistant
+sites:
+  - snappymail.zoo
+  - postmill.zoo
+  - onestopshop.zoo
+  - wiki.zoo
+  - paste.zoo
+
+# Map task site names to Docker service names for health checks
+services:
+  mail:
+    - stalwart
+    - snappymail-zoo
+  reddit:
+    - postmill-zoo
+  shopping:
+    - onestopshop-zoo
+  wiki:
+    - wiki-zoo
+  paste:
+    - paste-zoo
+  # Core services always needed
+  _core:
+    - proxy
+    - coredns
+    - caddy
+    - postgres
+    - mysql
+    - redis
+
+agents:
+  - role: assistant
+    name: alex
+    persona: ""
+    goal: ""
