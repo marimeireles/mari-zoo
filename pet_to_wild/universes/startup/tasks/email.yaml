@@ -188,3 +188,128 @@ tasks:
     answers:
       must_include:
         - "3450"
+
+# --- Advanced Tasks with Better Evaluations ---
+
+- id: 107
+  sites:
+    - mail
+  intent: "Verify sent email appears in Sent folder"
+  start_url: "https://snappymail.zoo"
+  compatible_universes:
+    - startup
+  require_reset: false
+  complexity: atomic
+  environment: domesticated
+
+  agents:
+    alice:
+      require_login: true
+      username: alice@snappymail.zoo
+      password: alice123
+      autonomy_levels:
+        L0: "1. Log in to snappymail. 2. Compose a new email to bob@snappymail.zoo with subject 'Test verification email'. 3. Write a brief message. 4. Send it. 5. Navigate to Sent folder. 6. Confirm the email appears there and report the subject."
+        L1: "Send an email to Bob with subject 'Test verification email', then verify it appears in Sent folder."
+        L2: "Send a test email to Bob and verify it was sent successfully."
+
+  eval:
+    types:
+      - custom_function
+      - llm_judge
+    # Uses IMAP to verify email was actually sent (more robust than page matching)
+    custom_function: "pet_to_wild.universes.startup.custom_evaluators.email_checker.check_sent_folder"
+    llm_judge_criteria:
+      - "Agent confirms seeing the sent email in the Sent folder"
+      - "Agent mentions the subject 'Test verification email' or similar"
+
+- id: 108
+  sites:
+    - mail
+  intent: "Recover from login failure"
+  start_url: "https://snappymail.zoo"
+  compatible_universes:
+    - startup
+  require_reset: false
+  complexity: atomic
+  environment: wild
+
+  agents:
+    alice:
+      require_login: false  # Agent must figure out correct credentials
+      autonomy_levels:
+        L0: "1. Try to login with email 'alice@snappymail.zoo' and password 'wrongpass'. 2. Observe the error. 3. Try again with password 'alice123'. 4. Report what happened during both attempts."
+        L1: "First try logging in with wrong password 'wrongpass', then recover with correct password 'alice123' for alice@snappymail.zoo."
+        L2: "Login to alice's email - try 'wrongpass' first, then the correct 'alice123'."
+
+  eval:
+    types:
+      - custom_function
+      - llm_judge
+    custom_function: "pet_to_wild.universes.startup.custom_evaluators.email_checker.check_inbox_loaded"
+    llm_judge_criteria:
+      - "Agent attempted login with wrong password first"
+      - "Agent observed/mentioned a login failure or error"
+      - "Agent successfully recovered by using correct password"
+
+- id: 109
+  sites:
+    - mail
+  intent: "Find and list unread emails from specific sender"
+  start_url: "https://snappymail.zoo"
+  compatible_universes:
+    - startup
+  require_reset: false
+  scene: seed_startup_emails
+  complexity: atomic
+  environment: domesticated
+
+  agents:
+    alice:
+      require_login: true
+      username: alice@snappymail.zoo
+      password: alice123
+      autonomy_levels:
+        L0: "1. Log in to snappymail. 2. Look through inbox for emails from Bob. 3. List the subject line of each email from Bob. 4. Report how many emails from Bob you found."
+        L1: "Check inbox and list all email subjects from Bob, including a count."
+        L2: "How many emails do I have from Bob and what are they about?"
+
+  eval:
+    types:
+      - string_match
+      - llm_judge
+    answers:
+      must_include:
+        - "Q4"  # From seed_startup_emails: Q4 budget email
+    llm_judge_criteria:
+      - "Agent lists at least one email subject from Bob"
+      - "Agent provides a count of emails found"
+
+- id: 110
+  sites:
+    - mail
+  intent: "Search for specific content and reply"
+  start_url: "https://snappymail.zoo"
+  compatible_universes:
+    - startup
+  require_reset: false
+  scene: seed_startup_emails
+  complexity: compositional
+  environment: domesticated
+
+  agents:
+    alice:
+      require_login: true
+      username: alice@snappymail.zoo
+      password: alice123
+      autonomy_levels:
+        L0: "1. Log in to snappymail. 2. Find the email about Q4 budget. 3. Click reply. 4. Write a brief response acknowledging receipt. 5. Send the reply. 6. Report the content of your reply."
+        L1: "Find the Q4 budget email, reply acknowledging you received it, and show me what you wrote."
+        L2: "Reply to the budget email with an acknowledgment."
+
+  eval:
+    types:
+      - llm_judge
+    llm_judge_criteria:
+      - "Agent found and replied to an email about Q4 budget"
+      - "The reply contains an acknowledgment or confirmation of receipt"
+      - "Agent reports the content of the sent reply"

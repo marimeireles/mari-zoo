@@ -608,3 +608,144 @@ def check_inbox(user: str, password: str, folder: str = "INBOX") -> Optional[int
             return int(match.group(1))
 
     return None
+
+
+def search_emails(
+    user: str,
+    password: str,
+    folder: str = "INBOX",
+    subject: Optional[str] = None,
+    from_addr: Optional[str] = None,
+    to_addr: Optional[str] = None,
+) -> list[int]:
+    """
+    Search for emails by criteria.
+
+    Args:
+        user: Email address
+        password: Email password
+        folder: Mailbox folder (default: INBOX)
+        subject: Subject to search for (partial match)
+        from_addr: From address to search for
+        to_addr: To address to search for
+
+    Returns:
+        List of message UIDs matching the criteria
+    """
+    # Build IMAP SEARCH command
+    search_criteria = []
+    if subject:
+        search_criteria.append(f'SUBJECT "{subject}"')
+    if from_addr:
+        search_criteria.append(f'FROM "{from_addr}"')
+    if to_addr:
+        search_criteria.append(f'TO "{to_addr}"')
+
+    if not search_criteria:
+        search_criteria.append("ALL")
+
+    search_query = " ".join(search_criteria)
+
+    # URL encode the folder name for spaces
+    encoded_folder = folder.replace(" ", "%20")
+
+    curl_cmd = [
+        "curl", "-s",
+        "-u", f"{user}:{password}",
+        f"imap://localhost/{encoded_folder}",
+        "--request", f"SEARCH {search_query}",
+    ]
+
+    result = _docker_compose_exec("stalwart", curl_cmd)
+
+    if result.returncode == 0 and result.stdout:
+        # Parse SEARCH response: "* SEARCH 1 2 3"
+        match = re.search(r"\* SEARCH\s*([\d\s]*)", result.stdout)
+        if match:
+            uids_str = match.group(1).strip()
+            if uids_str:
+                return [int(uid) for uid in uids_str.split()]
+
+    return []
+
+
+def get_email_headers(
+    user: str,
+    password: str,
+    uid: int,
+    folder: str = "INBOX",
+) -> dict[str, str]:
+    """
+    Get email headers for a specific message.
+
+    Args:
+        user: Email address
+        password: Email password
+        uid: Message UID
+        folder: Mailbox folder
+
+    Returns:
+        Dict of header name -> value
+    """
+    encoded_folder = folder.replace(" ", "%20")
+
+    curl_cmd = [
+        "curl", "-s",
+        "-u", f"{user}:{password}",
+        f"imap://localhost/{encoded_folder};UID={uid};SECTION=HEADER",
+    ]
+
+    result = _docker_compose_exec("stalwart", curl_cmd)
+
+    headers = {}
+    if result.returncode == 0 and result.stdout:
+        # Parse headers (simple line-by-line)
+        current_header = None
+        current_value = []
+
+        for line in result.stdout.split("\n"):
+            if line.startswith(" ") or line.startswith("\t"):
+                # Continuation of previous header
+                if current_header:
+                    current_value.append(line.strip())
+            elif ":" in line:
+                # Save previous header
+                if current_header:
+                    headers[current_header] = " ".join(current_value)
+                # Start new header
+                parts = line.split(":", 1)
+                current_header = parts[0].strip()
+                current_value = [parts[1].strip()] if len(parts) > 1 else []
+            else:
+                # End of headers
+                if current_header:
+                    headers[current_header] = " ".join(current_value)
+                break
+
+    return headers
+
+
+def email_exists_in_folder(
+    user: str,
+    password: str,
+    folder: str,
+    subject: Optional[str] = None,
+    from_addr: Optional[str] = None,
+    to_addr: Optional[str] = None,
+) -> bool:
+    """
+    Check if an email matching criteria exists in a folder.
+
+    Args:
+        user: Email address
+        password: Email password
+        folder: Mailbox folder to check
+        subject: Subject to search for (partial match)
+        from_addr: From address to search for
+        to_addr: To address to search for
+
+    Returns:
+        True if matching email found, False otherwise
+    """
+    uids = search_emails(user, password, folder, subject, from_addr, to_addr)
+    return len(uids) > 0

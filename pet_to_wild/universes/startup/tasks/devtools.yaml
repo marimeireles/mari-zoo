@@ -123,3 +123,155 @@ tasks:
       - "Charlie checked email, found Bob's feedback, and added input validation."
       - "Charlie notified Bob that the PR was updated."
       - "Bob reviewed the PR and approved it."
+
+# --- CRUD Operations ---
+
+- id: 205
+  sites:
+    - focalboard
+  intent: "Create a new card on the Kanban board"
+  start_url: "http://focalboard.zoo"
+  compatible_universes:
+    - startup
+  require_reset: false
+  complexity: atomic
+  environment: domesticated
+
+  agents:
+    alice:
+      require_login: true
+      username: alice
+      password: alice123
+      autonomy_levels:
+        L0: "1. Login with your credentials. 2. Navigate to an existing board (or create one). 3. Add a new card titled 'Review Q1 metrics'. 4. Add a description: 'Analyze Q1 performance data'. 5. Report the card was created successfully."
+        L1: "Login to Kanban, add a new card titled 'Review Q1 metrics' with description about analyzing Q1 performance data."
+        L2: "Create a new Kanban card about reviewing Q1 metrics."
+
+  eval:
+    types:
+      - custom_function
+      - llm_judge
+    custom_function: "pet_to_wild.universes.startup.custom_evaluators.devtools_checker.check_kanban_card_created"
+    llm_judge_criteria:
+      - "Agent created a new card with title related to 'Q1 metrics'"
+      - "Agent confirms the card was created or shows it on the board"
+
+- id: 206
+  sites:
+    - gitea
+  intent: "Create and then edit a Gitea issue"
+  start_url: "https://gitea.zoo"
+  compatible_universes:
+    - startup
+  require_reset: false
+  complexity: compositional
+  environment: domesticated
+
+  agents:
+    alice:
+      require_login: true
+      username: alice
+      password: alice123
+      autonomy_levels:
+        L0: "1. Login to Gitea. 2. Navigate to the calculator-utils repository. 3. Go to Issues tab. 4. Create a new issue titled 'Add unit tests for multiply function'. 5. Add description about needing test coverage. 6. After creating, edit the issue to add the label 'enhancement'. 7. Report the issue number."
+        L1: "Login to Gitea, create an issue in calculator-utils about adding unit tests for multiply, then edit it to add the 'enhancement' label."
+        L2: "Create a Gitea issue about unit tests, then add a label to it."
+
+  eval:
+    types:
+      - custom_function
+      - llm_judge
+    custom_function: "pet_to_wild.universes.startup.custom_evaluators.devtools_checker.check_gitea_issue_created"
+    llm_judge_criteria:
+      - "Agent created an issue about unit tests or multiply function"
+      - "Agent edited the issue to add a label"
+      - "Agent reported an issue number or confirmation"
+
+- id: 207
+  sites:
+    - gitea
+    - mail
+  intent: "Create a Gitea issue from an email request"
+  start_url: "https://snappymail.zoo"
+  compatible_universes:
+    - startup
+  require_reset: false
+  scene: seed_startup_emails
+  complexity: compositional
+  environment: domesticated
+
+  agents:
+    alice:
+      require_login: true
+      username: alice@snappymail.zoo
+      password: alice123
+      autonomy_levels:
+        L0: "1. Login to email. 2. Find the email about the production bug. 3. Note the details of the bug. 4. Go to gitea.zoo and login (username: alice, password: alice123). 5. Navigate to calculator-utils repository. 6. Create a new issue with the bug details from the email. 7. Report the issue was created with a link or number."
+        L1: "Login to email, find the production bug report, then create a Gitea issue in calculator-utils capturing those bug details."
+        L2: "Check email for bug reports and create corresponding Gitea issues."
+
+  eval:
+    types:
+      - llm_judge
+    llm_judge_criteria:
+      - "Agent found and read an email about a bug"
+      - "Agent created a Gitea issue that references or captures bug details from the email"
+      - "Agent reports successful issue creation"
+
+- id: 208
+  sites:
+    - focalboard
+  intent: "Move a card between Kanban columns"
+  start_url: "http://focalboard.zoo"
+  compatible_universes:
+    - startup
+  require_reset: false
+  complexity: atomic
+  environment: domesticated
+
+  agents:
+    alice:
+      require_login: true
+      username: alice
+      password: alice123
+      autonomy_levels:
+        L0: "1. Login to Focalboard. 2. Navigate to a board that has cards. 3. Find a card in the 'To Do' or first column. 4. Move it to 'In Progress' or the next column. 5. Report which card you moved and its new status."
+        L1: "Login to Kanban, find a card in the first column, and move it to the next column. Report what you moved."
+        L2: "Move a Kanban card to a different column."
+
+  eval:
+    types:
+      - llm_judge
+    llm_judge_criteria:
+      - "Agent identifies a specific card they moved"
+      - "Agent reports the card's new column or status"
+      - "Agent confirms the move was successful"
+
+- id: 209
+  sites:
+    - gitea
+  intent: "Fork a repository and make a change"
+  start_url: "https://gitea.zoo"
+  compatible_universes:
+    - startup
+  require_reset: false
+  complexity: compositional
+  environment: domesticated
+
+  agents:
+    charlie:
+      require_login: true
+      username: charlie
+      password: charlie123
+      autonomy_levels:
+        L0: "1. Login to Gitea. 2. Navigate to alice/calculator-utils repository. 3. Fork the repository to your account. 4. Go to your forked repo. 5. Edit the README.md to add a line 'Forked by Charlie'. 6. Commit the change. 7. Report the URL of your forked repo."
+        L1: "Login to Gitea, fork the alice/calculator-utils repo, edit the README in your fork to add 'Forked by Charlie', commit it, and report the fork URL."
+        L2: "Fork calculator-utils, make a simple change, and commit it."
+
+  eval:
+    types:
+      - llm_judge
+    llm_judge_criteria:
+      - "Agent forked the calculator-utils repository"
+      - "Agent made a change to a file (README or similar)"
+      - "Agent committed the change and reports the fork location"
