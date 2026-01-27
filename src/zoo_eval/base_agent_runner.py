@@ -41,7 +41,7 @@ class BaseAgentRunner(ABC):
         return None
 
     def _build_agent_context(self, agent_config: TaskAgentConfig) -> str:
-        """Build the agent context string from universe config."""
+        """Build the agent context string from universe and task config."""
         universe_agent = self._get_universe_agent(agent_config.name)
 
         # Start with name
@@ -63,6 +63,10 @@ class BaseAgentRunner(ABC):
         # Add accessible sites
         if self.universe and self.universe.sites:
             context += f"\nYou can access: {', '.join(self.universe.sites)}"
+
+        # Add task-specific context (e.g., calendar constraints)
+        if agent_config.context:
+            context += f"\n\n{agent_config.context}"
 
         return context
 

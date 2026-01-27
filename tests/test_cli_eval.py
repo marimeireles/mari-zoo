@@ -221,12 +221,14 @@ class TestEvalCommand:
 class TestEvalCommandIntegration:
     """Integration tests for eval command with real evaluators."""
 
-    @patch("pet_to_wild.universes.startup.custom_evaluators.coordination_checker.email_exists_in_folder")
-    def test_eval_with_imap_checker(self, mock_imap, mock_universe, temp_db):
+    @patch("pet_to_wild.universes.startup.custom_evaluators.coordination_checker.get_email_headers")
+    @patch("pet_to_wild.universes.startup.custom_evaluators.coordination_checker.get_email_body")
+    @patch("pet_to_wild.universes.startup.custom_evaluators.coordination_checker.search_emails")
+    def test_eval_with_imap_checker(self, mock_search, mock_body, mock_headers, mock_universe, temp_db):
         """Test eval command with IMAP-based coordination checker."""
         db_path, run_id = temp_db
 
-        # Update task file to use IMAP checker
+        # Update task file to use IMAP checker with agent contexts
         tasks_dir = mock_universe / "tasks"
         (tasks_dir / "coordination.yaml").write_text("""
 tasks:
@@ -237,9 +239,13 @@ tasks:
     start_url: "https://snappymail.zoo"
     agents:
       alice:
+        context: |
+          Calendar: Monday 9am-12pm, Wednesday 10am-3pm
         autonomy_levels:
           L1: "Send email"
       bob:
+        context: |
+          Calendar: Wednesday all day
         autonomy_levels:
           L1: "Reply"
     eval:
@@ -249,12 +255,23 @@ tasks:
 """)
 
         # Mock IMAP to return emails found
-        mock_imap.return_value = True
+        mock_search.return_value = [1]  # Return UID list
+        mock_headers.return_value = {"Subject": "Meeting proposal"}
+        mock_body.return_value = "Let's meet Wednesday at 11am"
 
-        result = runner.invoke(app, [
-            "eval", str(mock_universe), "-t", "coordination",
-            "--db", str(db_path)
-        ])
+        # Also mock the LLM call
+        with patch("zoo_eval.llm.create_openai_client") as mock_llm:
+            mock_client = MagicMock()
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock()]
+            mock_response.choices[0].message.content = '{"agreed_time": "Wednesday 11am", "valid_for_all": true, "passed": true, "reasoning": "Time works for both"}'
+            mock_client.chat.completions.create.return_value = mock_response
+            mock_llm.return_value = (mock_client, "gpt-4o")
+
+            result = runner.invoke(app, [
+                "eval", str(mock_universe), "-t", "coordination",
+                "--db", str(db_path)
+            ])
 
         # Should run without error and show IMAP verification passed
         assert result.exit_code == 0

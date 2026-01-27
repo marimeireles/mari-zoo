@@ -469,8 +469,17 @@ class HumanCriticEvaluator(Evaluator):
 class CustomFunctionEvaluator(Evaluator):
     """Executes user-defined custom evaluation functions."""
 
+    def __init__(self, task=None):
+        """Initialize with optional task for context-aware evaluation."""
+        self.task = task
+
     async def evaluate(self, result: TaskResult, evaluation: Evaluation) -> EvalResult:
-        """Load and execute custom evaluation function."""
+        """Load and execute custom evaluation function.
+
+        Custom functions can have these signatures:
+        - func(result) -> EvalResult  (basic)
+        - func(result, task=None) -> EvalResult  (with task context)
+        """
         if not evaluation.custom_function:
             return EvalResult(
                 passed=False,
@@ -513,14 +522,25 @@ class CustomFunctionEvaluator(Evaluator):
 
             custom_func = getattr(module, function_name)
 
-            # Call the function with result and return its EvalResult
+            # Call the function with result (and task if accepted)
             # Support both sync and async custom functions
             import asyncio
+            import inspect
+
+            # Check if function accepts 'task' parameter
+            sig = inspect.signature(custom_func)
+            accepts_task = 'task' in sig.parameters
 
             if asyncio.iscoroutinefunction(custom_func):
-                eval_result = await custom_func(result)
+                if accepts_task:
+                    eval_result = await custom_func(result, task=self.task)
+                else:
+                    eval_result = await custom_func(result)
             else:
-                eval_result = custom_func(result)
+                if accepts_task:
+                    eval_result = custom_func(result, task=self.task)
+                else:
+                    eval_result = custom_func(result)
 
             # Validate return type
             if not isinstance(eval_result, EvalResult):
@@ -550,7 +570,7 @@ def get_evaluator(
 
     Args:
         eval_type: Type of evaluator to create
-        task: Task object (required for HUMAN_CRITIC)
+        task: Task object (required for HUMAN_CRITIC, optional for CUSTOM_FUNCTION)
         universe_name: Universe name (for HUMAN_CRITIC file organization)
         judge_model: Model to use for LLM_JUDGE (auto-detects provider)
     """
@@ -565,7 +585,7 @@ def get_evaluator(
             raise ValueError("HumanCriticEvaluator requires task parameter")
         return HumanCriticEvaluator(task=task, universe_name=universe_name)
     elif eval_type == EvalType.CUSTOM_FUNCTION:
-        return CustomFunctionEvaluator()
+        return CustomFunctionEvaluator(task=task)
     else:
         raise ValueError(f"Unknown eval type: {eval_type}")
 

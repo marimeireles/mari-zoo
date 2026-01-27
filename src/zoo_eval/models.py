@@ -272,6 +272,7 @@ class TaskAgentConfig:
     username: str | None = None
     password: str | None = None
     autonomy_levels: dict[str, str] = field(default_factory=dict)
+    context: str | None = None  # Agent-specific context (e.g., calendar constraints)
 
     @classmethod
     def from_dict(cls, name: str, data: dict) -> TaskAgentConfig:
@@ -281,6 +282,7 @@ class TaskAgentConfig:
             username=data.get("username"),
             password=data.get("password"),
             autonomy_levels=data.get("autonomy_levels", {}),
+            context=data.get("context"),
         )
 
 

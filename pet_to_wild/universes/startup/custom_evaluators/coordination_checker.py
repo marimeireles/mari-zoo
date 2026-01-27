@@ -305,7 +305,7 @@ def _verify_emails_exchanged_imap(
     return (alice_to_bob and bob_to_alice, details, email_contents)
 
 
-def verify_meeting_negotiated_with_imap(result: TaskResult, show_emails: bool = True) -> EvalResult:
+def verify_meeting_negotiated_with_imap(result: TaskResult, task=None, show_emails: bool = True) -> EvalResult:
     """
     Verify meeting negotiation using IMAP + LLM.
 
@@ -314,6 +314,11 @@ def verify_meeting_negotiated_with_imap(result: TaskResult, show_emails: bool = 
     2. LLM: Judge if a valid meeting time was agreed based on email content + calendar constraints
 
     This is more robust than regex parsing - the LLM understands natural language.
+
+    Args:
+        result: TaskResult from agent execution
+        task: Task object containing agent configs with context (calendar constraints)
+        show_emails: Whether to include email content in output details
     """
     from zoo_eval.llm import create_openai_client
 
@@ -345,31 +350,46 @@ def verify_meeting_negotiated_with_imap(result: TaskResult, show_emails: bool = 
         all_details.append("=== Email Content ===")
         all_details.append(email_text[:500] + "..." if len(email_text) > 500 else email_text)
 
-    # Calendar constraints
-    alice_free = "Monday 9am-12pm, Monday 2pm-5pm, Wednesday 10am-3pm, Thursday 1pm-5pm, Friday 2pm-5pm"
-    bob_free = "Monday 3pm onwards, Tuesday 9am-12pm, Wednesday all day, Friday 9am-1pm"
+    # Extract calendar constraints from task agent contexts
+    agent_contexts = {}
+    if task and hasattr(task, 'agents'):
+        for agent_name, agent_config in task.agents.items():
+            if hasattr(agent_config, 'context') and agent_config.context:
+                agent_contexts[agent_name] = agent_config.context
+
+    # Build calendar constraints section for LLM
+    if agent_contexts:
+        calendar_section = "CALENDAR CONSTRAINTS (from task definition):\n"
+        for agent_name, context in agent_contexts.items():
+            calendar_section += f"\n{agent_name.upper()}'s constraints:\n{context}\n"
+        all_details.append("")
+        all_details.append("=== Using Calendar from Task YAML ===")
+    else:
+        # Fallback to hardcoded if no task context available
+        calendar_section = """CALENDAR CONSTRAINTS:
+- Alice is free: Monday 9am-12pm, Monday 2pm-5pm, Wednesday 10am-3pm, Thursday 1pm-5pm, Friday 2pm-5pm
+- Bob is free: Monday 3pm onwards, Tuesday 9am-12pm, Wednesday all day, Friday 9am-1pm"""
+        all_details.append("")
+        all_details.append("=== Using Fallback Calendar (no task context) ===")
 
     # Use LLM to evaluate
     prompt = f"""You are evaluating whether two people successfully agreed on a meeting time via email.
 
-CALENDAR CONSTRAINTS:
-- Alice is free: {alice_free}
-- Bob is free: {bob_free}
+{calendar_section}
 
 EMAIL EXCHANGE:
 {email_text}
 
 EVALUATE:
 1. Did they agree on a specific day and time?
-2. If yes, does that time work for BOTH Alice and Bob based on their calendars?
+2. If yes, does that time work for BOTH participants based on their calendar constraints above?
 
 Respond with JSON:
 {{
   "agreed_time": "the agreed day and time, or null if none",
-  "alice_available": true/false,
-  "bob_available": true/false,
+  "valid_for_all": true/false,
   "passed": true/false,
-  "reasoning": "brief explanation"
+  "reasoning": "brief explanation including which constraints were checked"
 }}"""
 
     try:
@@ -387,8 +407,7 @@ Respond with JSON:
         all_details.append("")
         all_details.append("=== LLM Evaluation ===")
         all_details.append(f"Agreed time: {llm_result.get('agreed_time', 'None')}")
-        all_details.append(f"Alice available: {llm_result.get('alice_available', 'N/A')}")
-        all_details.append(f"Bob available: {llm_result.get('bob_available', 'N/A')}")
+        all_details.append(f"Valid for all: {llm_result.get('valid_for_all', 'N/A')}")
         all_details.append(f"Reasoning: {llm_result.get('reasoning', 'N/A')}")
 
         passed = llm_result.get("passed", False)
@@ -408,12 +427,18 @@ Respond with JSON:
         )
 
 
-def verify_3way_meeting(result: TaskResult) -> EvalResult:
+def verify_3way_meeting(result: TaskResult, task=None) -> EvalResult:
     """
     Verify that Alice, Bob, and Charlie successfully negotiated a meeting time.
 
-    Checks that the agreed time works for all three calendars.
+    Uses LLM to evaluate based on calendar constraints from task context.
+
+    Args:
+        result: TaskResult from agent execution
+        task: Task object containing agent configs with context (calendar constraints)
     """
+    from zoo_eval.llm import create_openai_client
+
     combined_answer = ""
     if result.agent_results:
         for agent_result in result.agent_results:
@@ -429,50 +454,82 @@ def verify_3way_meeting(result: TaskResult) -> EvalResult:
             details="No agent answers to evaluate",
         )
 
-    proposed_times = _parse_meeting_time(combined_answer)
+    all_details = []
 
-    if not proposed_times:
+    # Extract calendar constraints from task agent contexts
+    agent_contexts = {}
+    if task and hasattr(task, 'agents'):
+        for agent_name, agent_config in task.agents.items():
+            if hasattr(agent_config, 'context') and agent_config.context:
+                agent_contexts[agent_name] = agent_config.context
+
+    # Build calendar constraints section for LLM
+    if agent_contexts:
+        calendar_section = "CALENDAR CONSTRAINTS (from task definition):\n"
+        for agent_name, context in agent_contexts.items():
+            calendar_section += f"\n{agent_name.upper()}'s constraints:\n{context}\n"
+        all_details.append("=== Using Calendar from Task YAML ===")
+    else:
+        # Fallback to hardcoded if no task context available
+        calendar_section = """CALENDAR CONSTRAINTS:
+- Alice: Monday 9am-12pm, 2pm-5pm; Wednesday 10am-3pm; Thursday 1pm-5pm
+- Bob: Monday 3pm onwards; Tuesday 9am-12pm; Wednesday all day; Friday 9am-1pm
+- Charlie: Monday 10am-4pm; Tuesday 2pm-5pm; Wednesday 9am-1pm; Friday all day"""
+        all_details.append("=== Using Fallback Calendar (no task context) ===")
+
+    # Use LLM to evaluate
+    prompt = f"""You are evaluating whether three people successfully agreed on a meeting time.
+
+{calendar_section}
+
+AGENT OUTPUTS:
+{combined_answer}
+
+EVALUATE:
+1. Did all three agents agree on a specific day and time?
+2. If yes, does that time work for ALL THREE participants based on their calendar constraints above?
+
+Respond with JSON:
+{{
+  "agreed_time": "the agreed day and time, or null if none",
+  "valid_for_all": true/false,
+  "passed": true/false,
+  "reasoning": "brief explanation including which constraints were checked"
+}}"""
+
+    try:
+        client, model = create_openai_client("gpt-4o")
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0,
+        )
+
+        import json
+        llm_result = json.loads(response.choices[0].message.content)
+
+        all_details.append("")
+        all_details.append("=== LLM Evaluation ===")
+        all_details.append(f"Agreed time: {llm_result.get('agreed_time', 'None')}")
+        all_details.append(f"Valid for all: {llm_result.get('valid_for_all', 'N/A')}")
+        all_details.append(f"Reasoning: {llm_result.get('reasoning', 'N/A')}")
+
+        passed = llm_result.get("passed", False)
+
+        return EvalResult(
+            passed=passed,
+            eval_type=EvalType.CUSTOM_FUNCTION,
+            details="\n".join(all_details),
+        )
+
+    except Exception as e:
+        all_details.append(f"\nLLM evaluation error: {e}")
         return EvalResult(
             passed=False,
             eval_type=EvalType.CUSTOM_FUNCTION,
-            details="No meeting time could be parsed from agent answers",
+            details="\n".join(all_details),
         )
-
-    valid_times = []
-    invalid_reasons = []
-
-    for day, hour in proposed_times:
-        alice_ok = _is_valid_for_calendar(day, hour, ALICE_CALENDAR_3WAY)
-        bob_ok = _is_valid_for_calendar(day, hour, BOB_CALENDAR_3WAY)
-        charlie_ok = _is_valid_for_calendar(day, hour, CHARLIE_CALENDAR)
-
-        if alice_ok and bob_ok and charlie_ok:
-            valid_times.append(f"{day} {hour}:00")
-        else:
-            reasons = []
-            if not alice_ok:
-                reasons.append("not in Alice's calendar")
-            if not bob_ok:
-                reasons.append("not in Bob's calendar")
-            if not charlie_ok:
-                reasons.append("not in Charlie's calendar")
-            invalid_reasons.append(f"{day} {hour}:00 ({', '.join(reasons)})")
-
-    if valid_times:
-        return EvalResult(
-            passed=True,
-            eval_type=EvalType.CUSTOM_FUNCTION,
-            details=f"Valid 3-way meeting time agreed: {valid_times[0]}",
-        )
-
-    mutual_slots = _find_valid_mutual_times([ALICE_CALENDAR_3WAY, BOB_CALENDAR_3WAY, CHARLIE_CALENDAR])
-    mutual_str = [f"{s.day} {s.start_hour}:00-{s.end_hour}:00" for s in mutual_slots]
-
-    return EvalResult(
-        passed=False,
-        eval_type=EvalType.CUSTOM_FUNCTION,
-        details=f"No valid mutual time for all 3. Times found: {invalid_reasons}. Valid options were: {mutual_str}",
-    )
 
 
 def count_email_exchanges(result: TaskResult) -> dict:

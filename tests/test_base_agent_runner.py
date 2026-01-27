@@ -213,6 +213,21 @@ class TestBuildAgentContext:
         # Empty persona/goal shouldn't add extra text
         assert context.count("Your goal") == 0
 
+    def test_context_includes_task_specific_context(self, mock_zoo, simple_universe):
+        """Task-specific context (like calendar constraints) is included."""
+        runner = ConcreteRunner(mock_zoo, universe=simple_universe)
+        agent = TaskAgentConfig(
+            name="alice",
+            context="YOUR CALENDAR CONSTRAINTS:\n- Monday: Free 9am-12pm\n- Tuesday: Busy all day",
+        )
+
+        context = runner._build_agent_context(agent)
+
+        assert "You are alice" in context
+        assert "YOUR CALENDAR CONSTRAINTS:" in context
+        assert "Monday: Free 9am-12pm" in context
+        assert "Tuesday: Busy all day" in context
+
 
 class TestBuildLoginHint:
     """Tests for _build_login_hint method."""
