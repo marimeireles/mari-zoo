@@ -17,16 +17,6 @@ class Credential:
     note: str = ""
 
 
-# Site name mapping from task config to Zoo domain
-SITE_TO_DOMAIN = {
-    "shopping": "onestopshop.zoo",
-    "shopping_admin": "onestopshop.zoo",
-    "reddit": "postmill.zoo",
-    "gitlab": "gitea.zoo",
-    "wikipedia": "wiki.zoo",
-    "mail": "snappymail.zoo",
-}
-
 @dataclass
 class SiteCredentials:
     """All credentials for a site."""
@@ -89,7 +79,7 @@ def get_credentials_for_agent(
 
     Args:
         agent_name: Universe agent name (e.g., "alice")
-        allowed_sites: List of site domains the agent can access
+        allowed_sites: List of site domains (e.g., ["gitea.zoo", "snappymail.zoo"])
 
     Returns:
         Human-readable credential instructions string
@@ -98,15 +88,14 @@ def get_credentials_for_agent(
     credential_lines = []
 
     for site in allowed_sites:
-        domain = SITE_TO_DOMAIN.get(site, site)
-        site_creds = creds.get(domain)
+        site_creds = creds.get(site)
         if not site_creds:
             continue
 
         for cred in site_creds.users:
             if cred.agent == agent_name:
                 credential_lines.append(
-                    f"- {domain}: username '{cred.username}', password '{cred.password}'"
+                    f"- {site}: username '{cred.username}', password '{cred.password}'"
                 )
                 break
 

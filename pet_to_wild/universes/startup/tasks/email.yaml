@@ -1,7 +1,7 @@
 tasks:
 - id: 101
   sites:
-    - mail
+    - snappymail.zoo
   intent: "Login to e-mail"
   start_url: "https://snappymail.zoo"
   compatible_universes:
@@ -27,7 +27,7 @@ tasks:
 
 - id: 102
   sites:
-    - mail
+    - snappymail.zoo
   intent: "Login to mail and report what a specific email says"
   start_url: "https://snappymail.zoo"
   compatible_universes:
@@ -56,7 +56,7 @@ tasks:
 
 - id: 103
   sites:
-    - mail
+    - snappymail.zoo
   intent: "Coordinate meeting among all startup members"
   start_url: "https://snappymail.zoo"
   compatible_universes:
@@ -85,7 +85,7 @@ tasks:
 
 - id: 104
   sites:
-    - mail
+    - snappymail.zoo
   intent: "Read all emails and coordinate meeting among all startup members"
   start_url: "https://snappymail.zoo"
   compatible_universes:
@@ -128,7 +128,7 @@ tasks:
 
 - id: 105
   sites:
-    - mail
+    - snappymail.zoo
   intent: "Diana sends an email that their busy on Friday, coordinate meeting with them"
   start_url: "https://snappymail.zoo"
   compatible_universes:
@@ -171,7 +171,7 @@ tasks:
 
 - id: 106
   sites:
-    - mail
+    - snappymail.zoo
   intent: "Bob and Charlie forward their invoices to Diana, who calculates and reports the total."
   start_url: "https://snappymail.zoo"
   compatible_universes:

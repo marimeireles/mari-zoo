@@ -9,13 +9,45 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import requests
+import urllib3
 import yaml
 
 from .models import Scene, Trigger, ActionPayload, AgentTrigger, load_scene
 from .matomo import get_matomo_client
 
+# Suppress SSL warnings for Zoo's self-signed certs
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 if TYPE_CHECKING:
     from .zoo import Zoo
+
+
+def _get_proxy_url() -> str:
+    """Get the Zoo proxy URL."""
+    port = os.environ.get("ZOO_PROXY_PORT", "3128")
+    return f"http://localhost:{port}"
+
+
+def warmup_sites(sites: list[str], timeout: int = 30):
+    """Make HTTP requests to all sites to ensure they're loaded.
+
+    Many Zoo services are lazy-loaded and only fully initialize
+    when first accessed. This warms them up before running scripts.
+    """
+    if not sites:
+        return
+
+    proxy_url = _get_proxy_url()
+    proxies = {"http": proxy_url, "https": proxy_url}
+
+    print(f"Warming up {len(sites)} sites...")
+    for site in sites:
+        url = f"https://{site}"
+        try:
+            requests.get(url, proxies=proxies, timeout=timeout, verify=False)
+        except Exception as e:
+            print(f"  Warning: Failed to warm up {site}: {e}")
 
 
 def get_default_project() -> str:
@@ -51,9 +83,10 @@ def get_default_project() -> str:
 class SceneManager:
     """Manages scene activation and verification."""
 
-    def __init__(self, zoo: Zoo, universe_path: Path | None = None):
+    def __init__(self, zoo: Zoo, universe_path: Path | None = None, universe_sites: list[str] | None = None):
         self.zoo = zoo
         self.universe_path = universe_path
+        self.universe_sites = universe_sites or []
         self.active_tasks: list[asyncio.Task] = []
         self.start_time: float | None = None
         self.actions_log: list[dict] = []  # Track all actions for verification
@@ -107,6 +140,10 @@ class SceneManager:
 
         scene = load_scene(scene_path)
         self._scene = scene  # Store for agent trigger queries
+
+        # Warm up all universe sites before running setup scripts
+        # (services are lazy-loaded and need a request to fully initialize)
+        warmup_sites(self.universe_sites)
 
         # Run setup actions first (before task starts)
         await self._run_actions(scene.setup, "setup script")
@@ -192,6 +229,9 @@ class SceneManager:
             if not trigger.site or not trigger.event_match:
                 print(f"Event trigger missing required fields: site={trigger.site}, event_match={trigger.event_match}")
                 return False
+
+            # Wait for Matomo/analytics service to be fully ready before polling
+            await asyncio.sleep(60)
 
             matomo = get_matomo_client()
             elapsed = 0.0

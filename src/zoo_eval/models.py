@@ -30,7 +30,7 @@ class RunConfig:
     model: str = "google/gemini-2.5-flash-lite"  # Model for agent (auto-detects provider)
     judge_model: str = "gpt-4o"  # Model for LLM judge evaluation (auto-detects provider)
     shared_browser: bool = False  # If True, all agents share the same browser and memory
-    autonomy_levels: list[str] = field(default_factory=lambda: ["L1"])  # Which levels to run (L0, L1, L2)
+    autonomy_levels: list[str] = field(default_factory=lambda: ["L0", "L1", "L2"])  # Which levels to run
     completed_pairs: set[tuple[int, str]] = field(default_factory=set)  # (task_id, level) pairs to skip (for resume)
     harness: AgentHarness = AgentHarness.BROWSER_USE  # Which agent harness to use
     claude_model: str = "sonnet"  # Claude model for Claude SDK harness ("opus", "sonnet", "haiku")

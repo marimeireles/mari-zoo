@@ -101,7 +101,7 @@ class MatomoClient:
                 self.matomo_url,
                 params={**params, "format": "json"},
                 proxies={"http": self.proxy_url, "https": self.proxy_url},
-                timeout=10,
+                timeout=30,
                 verify=False,
             )
             response.raise_for_status()

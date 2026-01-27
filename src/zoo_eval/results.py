@@ -398,107 +398,68 @@ def print_report(db: ResultsDB, run_id: int, detailed: bool = False):
     console = Console()
     stats = db.get_run_stats(run_id)
 
-    # Overall metrics
-    console.print(f"\n[bold]═══ Run #{run_id} Summary ═══[/bold]")
-    console.print(f"  Total tasks: {stats['total']}")
-    console.print(f"  Avg score: [bold]{stats['avg_score']:.2f}[/bold]")
-    console.print(f"  Completed (score=1.0): [green]{stats['completed']}[/green] ({stats['completion_rate']:.1f}%)")
+    # Overall summary line
+    console.print(f"\n[bold]═══ Run #{run_id} ═══[/bold]")
+    summary_parts = [
+        f"Score: [bold]{stats['avg_score']:.2f}[/bold]",
+        f"Completed: [green]{stats['completed']}/{stats['total']}[/green]",
+    ]
     if stats['total_subtasks'] > 0:
-        console.print(f"  Subtasks: {stats['total_subtasks_passed']}/{stats['total_subtasks']}")
-    console.print(f"  Errors: {stats['errors']}")
-    console.print(f"  Avg duration: {stats['avg_duration']:.1f}s | Total: {stats['total_duration']:.1f}s")
+        summary_parts.append(f"Subtasks: {stats['total_subtasks_passed']}/{stats['total_subtasks']}")
+    if stats['errors'] > 0:
+        summary_parts.append(f"[red]Errors: {stats['errors']}[/red]")
+    summary_parts.append(f"Time: {stats['total_duration']:.0f}s")
+    console.print("  " + " | ".join(summary_parts))
 
-    # By environment
-    if stats.get("by_environment"):
-        console.print(f"\n[bold]By Environment:[/bold]")
-        env_table = Table(show_header=True, header_style="bold")
-        env_table.add_column("Environment")
-        env_table.add_column("Avg Score")
-        env_table.add_column("Completed")
-        env_table.add_column("Total")
-
-        for env in ["domesticated", "tame", "wild"]:
-            env_data = stats["by_environment"].get(env, {})
-            if env_data.get("total", 0) > 0:
-                score = env_data.get("avg_score", 0)
-                color = _score_color(score)
-                env_table.add_row(
-                    env.capitalize(),
-                    f"[{color}]{score:.2f}[/{color}]",
-                    str(env_data.get("completed", 0)),
-                    str(env_data.get("total", 0)),
-                )
-        console.print(env_table)
-
-    # By complexity
-    if stats.get("by_complexity"):
-        console.print(f"\n[bold]By Complexity:[/bold]")
-        comp_table = Table(show_header=True, header_style="bold")
-        comp_table.add_column("Complexity")
-        comp_table.add_column("Avg Score")
-        comp_table.add_column("Completed")
-        comp_table.add_column("Total")
-
-        for comp in ["atomic", "compositional", "open_ended"]:
-            comp_data = stats["by_complexity"].get(comp, {})
-            if comp_data.get("total", 0) > 0:
-                score = comp_data.get("avg_score", 0)
-                color = _score_color(score)
-                comp_table.add_row(
-                    comp.replace("_", " ").capitalize(),
-                    f"[{color}]{score:.2f}[/{color}]",
-                    str(comp_data.get("completed", 0)),
-                    str(comp_data.get("total", 0)),
-                )
-        console.print(comp_table)
-
-    # By autonomy level
-    if stats.get("by_level"):
-        console.print(f"\n[bold]By Autonomy Level:[/bold]")
-        level_table = Table(show_header=True, header_style="bold")
-        level_table.add_column("Level")
-        level_table.add_column("Avg Score")
-        level_table.add_column("Completed")
-        level_table.add_column("Total")
-
-        for level in ["L0", "L1", "L2"]:
-            level_data = stats["by_level"].get(level, {})
-            if level_data.get("total", 0) > 0:
-                score = level_data.get("avg_score", 0)
-                color = _score_color(score)
-                level_table.add_row(
-                    level,
-                    f"[{color}]{score:.2f}[/{color}]",
-                    str(level_data.get("completed", 0)),
-                    str(level_data.get("total", 0)),
-                )
-        console.print(level_table)
-
-    # Task results
+    # Task results with subtask details
     all_results = db.get_run_results(run_id)
-    if all_results:
-        # Group results by task_id
-        tasks_by_id: dict[int, dict[str, dict]] = {}
-        for row in all_results:
-            task_id = row["task_id"]
-            level = row.get("autonomy_level", "L1")
-            if task_id not in tasks_by_id:
-                tasks_by_id[task_id] = {}
-            tasks_by_id[task_id][level] = row
+    if not all_results:
+        return
 
-        console.print(f"\n[bold]Task Scores:[/bold]")
-        results_table = Table(show_header=True, header_style="bold")
-        results_table.add_column("Task")
-        results_table.add_column("L0")
-        results_table.add_column("L1")
-        results_table.add_column("L2")
-        results_table.add_column("Progress")
+    # Group results by environment, then by task_id
+    results_by_env: dict[str, dict[int, dict[str, dict]]] = {}
+    for row in all_results:
+        env = row.get("environment") or "unknown"
+        task_id = row["task_id"]
+        level = row.get("autonomy_level", "L1")
+
+        if env not in results_by_env:
+            results_by_env[env] = {}
+        if task_id not in results_by_env[env]:
+            results_by_env[env][task_id] = {}
+        results_by_env[env][task_id][level] = row
+
+    # Display a table per environment
+    env_order = ["domesticated", "tame", "wild", "unknown"]
+    for env in env_order:
+        if env not in results_by_env:
+            continue
+
+        tasks_by_id = results_by_env[env]
+        env_display = env.capitalize() if env != "unknown" else "Other"
+
+        console.print()
+        results_table = Table(show_header=True, header_style="bold", title=f"{env_display} Environment")
+        results_table.add_column("Task", style="bold")
+        results_table.add_column("L0", justify="center")
+        results_table.add_column("L1", justify="center")
+        results_table.add_column("L2", justify="center")
+        results_table.add_column("Subtasks")
 
         for task_id in sorted(tasks_by_id.keys()):
             levels = tasks_by_id[task_id]
-            # Get best score for progress bar
-            best_score = max((levels.get(l, {}).get("score", 0) for l in ["L0", "L1", "L2"]), default=0)
             row_data = [str(task_id)]
+
+            # Collect subtask info from first available level
+            subtask_info = ""
+            for level in ["L0", "L1", "L2"]:
+                if level in levels:
+                    result = levels[level]
+                    subtasks_passed = result.get("subtasks_passed", 0)
+                    subtasks_total = result.get("subtasks_total", 0)
+                    if subtasks_total > 0:
+                        subtask_info = f"{subtasks_passed}/{subtasks_total}"
+                    break
 
             for level in ["L0", "L1", "L2"]:
                 if level not in levels:
@@ -507,46 +468,37 @@ def print_report(db: ResultsDB, run_id: int, detailed: bool = False):
 
                 result = levels[level]
                 score = result.get("score", 0)
-                subtasks_passed = result.get("subtasks_passed", 0)
-                subtasks_total = result.get("subtasks_total", 0)
                 color = _score_color(score)
+                row_data.append(f"[{color}]{score:.2f}[/{color}]")
 
-                if subtasks_total > 0:
-                    row_data.append(f"[{color}]{score:.2f} ({subtasks_passed}/{subtasks_total})[/{color}]")
-                else:
-                    row_data.append(f"[{color}]{score:.2f}[/{color}]")
-
-            row_data.append(_score_to_bar(best_score))
+            row_data.append(subtask_info)
             results_table.add_row(*row_data)
 
         console.print(results_table)
 
-        # Detailed subtask breakdown
-        if detailed:
-            console.print(f"\n[bold]═══ Detailed Results ═══[/bold]")
-            for task_id in sorted(tasks_by_id.keys()):
-                levels = tasks_by_id[task_id]
-                for level in ["L0", "L1", "L2"]:
-                    if level not in levels:
-                        continue
-                    result = levels[level]
-                    score = result.get("score", 0)
-                    color = _score_color(score)
-                    task_name = result.get("task_name", "")[:50]
+        # Show subtask details for each task in this environment
+        for task_id in sorted(tasks_by_id.keys()):
+            levels = tasks_by_id[task_id]
+            # Use first available level for subtask details
+            for level in ["L0", "L1", "L2"]:
+                if level not in levels:
+                    continue
+                result = levels[level]
 
-                    console.print(f"\n[bold]Task {task_id} ({level}):[/bold] [{color}]{score:.2f}[/{color}] {_score_to_bar(score)}")
-                    if task_name:
-                        console.print(f"  [dim]{task_name}[/dim]")
+                # Get subtask results from DB
+                task_result_id = db.conn.execute(
+                    "SELECT id FROM task_results WHERE run_id = ? AND task_id = ? AND autonomy_level = ?",
+                    (run_id, task_id, level)
+                ).fetchone()
 
-                    # Show subtasks if available (need task_result_id)
-                    # For now show summary
-                    subtasks_passed = result.get("subtasks_passed", 0)
-                    subtasks_total = result.get("subtasks_total", 0)
-                    if subtasks_total > 0:
-                        console.print(f"  Subtasks: {subtasks_passed}/{subtasks_total}")
+                if task_result_id:
+                    subtasks = db.get_subtask_results(task_result_id["id"])
+                    if subtasks:
+                        console.print(f"\n[bold]Task {task_id}[/bold] - {result.get('task_name', '')[:60]}")
+                        for s in subtasks:
+                            status = "[green]✓[/green]" if s["passed"] else "[red]✗[/red]"
+                            console.print(f"  {status} {s['subtask_id']}: {s['description'][:70]}")
 
-                    # Show error if present
-                    if result.get("error"):
-                        console.print(f"  [red]Error: {result['error']}[/red]")
-        else:
-            console.print(f"\n[dim]Use --detailed or -d to see subtask details[/dim]")
+                        if result.get("error"):
+                            console.print(f"  [red]Error: {result['error']}[/red]")
+                break  # Only show subtasks once per task

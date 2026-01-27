@@ -357,7 +357,8 @@ class AgentRunner(BaseAgentRunner):
             # - If you need isolated state per level, run levels separately with --level
             scene_manager = None
             if task.scene_name:
-                scene_manager = SceneManager(self.zoo, self.universe_path)
+                universe_sites = self.universe.sites if self.universe else []
+                scene_manager = SceneManager(self.zoo, self.universe_path, universe_sites)
                 await scene_manager.load_and_activate_scene(task.scene_name, task_start_time)
 
             try:
