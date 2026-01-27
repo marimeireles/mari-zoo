@@ -16,18 +16,17 @@ tasks:
   complexity: compositional
   environment: wild
 
-  # Coordination metadata
+  # Enable turn-based coordination for multi-round negotiation
   coordination:
-    type: negotiation
-    communication_channel: email
-    max_rounds: 10  # Maximum email exchanges before timeout
+    mode: turn_based
+    max_rounds: 6
+    round_timeout: 120
 
   agents:
     alice:
       require_login: true
       username: alice@snappymail.zoo
       password: alice123
-      # Alice initiates the meeting request
       context: |
         YOUR CALENDAR CONSTRAINTS:
         - Monday: Free 9am-12pm, 2pm-5pm
@@ -35,26 +34,29 @@ tasks:
         - Wednesday: Free 10am-3pm
         - Thursday: Free 1pm-5pm
         - Friday: Busy morning, free 2pm-5pm
-
-        GOAL: Propose meeting times to Bob (bob@snappymail.zoo).
-        Send him 2-3 time options that work for your calendar.
-
-        IMPORTANT: After sending your email, state your proposed times in your final answer.
-        Format: "I proposed meeting on [Day] at [Time]"
       autonomy_levels:
         L0: |
           1. Login to snappymail
           2. Compose an email to bob@snappymail.zoo proposing 2-3 meeting times
           3. Send the email
-          4. State in your final answer which times you proposed
-        L1: "Email Bob to propose 2-3 meeting times from your calendar. After sending, state which times you proposed."
-        L2: "Propose meeting times to Bob via email."
+          4. End with [SIGNAL: waiting:email_from:bob@snappymail.zoo]
+
+          When you run again after Bob replies:
+          1. Check your inbox for Bob's reply
+          2. Confirm the agreed meeting time
+          3. End with [SIGNAL: complete] and state the final meeting time
+        L1: |
+          Email Bob (bob@snappymail.zoo) to propose 2-3 meeting times from your calendar.
+          After sending, end with [SIGNAL: waiting:email_from:bob@snappymail.zoo]
+
+          When you run again after Bob replies, read his response and confirm the meeting.
+          End with [SIGNAL: complete] stating the agreed time.
+        L2: "Propose meeting times to Bob via email, then confirm when he responds."
 
     bob:
       require_login: true
       username: bob@snappymail.zoo
       password: bob123
-      # Bob responds to Alice's proposals
       context: |
         YOUR CALENDAR CONSTRAINTS:
         - Monday: Busy until 3pm
@@ -62,29 +64,28 @@ tasks:
         - Wednesday: Free all day
         - Thursday: Busy all day (offsite)
         - Friday: Free 9am-1pm
-
-        GOAL: Respond to Alice's meeting request (alice@snappymail.zoo).
-        Check your inbox for her proposal, then:
-        - If any of her times work for you, accept one and reply confirming it
-        - If none work, suggest alternatives from your free times
-
-        IMPORTANT: State the agreed meeting time in your final answer.
-        Format: "Meeting agreed for [Day] at [Time]" or "I accepted [Day] at [Time]"
       autonomy_levels:
         L0: |
           1. Login to snappymail
           2. Check inbox for Alice's meeting request
-          3. Compare her proposed times against your calendar
-          4. Reply accepting a time that works for BOTH of you
-          5. State the agreed meeting time in your final answer
-        L1: "Check email for Alice's meeting request. Accept a time that works for your calendar and reply. State the agreed time in your final answer."
+          3. If no email from Alice yet, end with [SIGNAL: waiting:email_from:alice@snappymail.zoo]
+          4. Compare her proposed times against your calendar
+          5. Reply accepting a time that works for BOTH of you
+          6. End with [SIGNAL: complete] stating the agreed meeting time
+        L1: |
+          Check your inbox for Alice's meeting request (alice@snappymail.zoo).
+          If no email yet, end with [SIGNAL: waiting:email_from:alice@snappymail.zoo]
+
+          When you see Alice's email, compare her times to your calendar.
+          Reply accepting a time that works for you, then end with [SIGNAL: complete]
+          stating "Meeting agreed for [Day] at [Time]"
         L2: "Respond to Alice's meeting request. Accept a valid time and report it."
 
   eval:
     types:
       - custom_function
       - llm_judge
-    custom_function: "pet_to_wild.universes.startup.custom_evaluators.coordination_checker.verify_meeting_negotiated"
+    custom_function: "pet_to_wild.universes.startup.custom_evaluators.coordination_checker.verify_meeting_negotiated_with_imap"
     llm_judge_criteria:
       - "Both agents exchanged at least one email each"
       - "A specific meeting day and time was agreed upon"
@@ -104,9 +105,9 @@ tasks:
   environment: wild
 
   coordination:
-    type: negotiation
-    communication_channel: email
-    max_rounds: 15
+    mode: turn_based
+    max_rounds: 10
+    round_timeout: 120
 
   agents:
     alice:
@@ -120,11 +121,14 @@ tasks:
         - Wednesday: Free 10am-3pm
         - Thursday: Free 1pm-5pm
         - Friday: Busy
-
-        GOAL: Schedule a 1-hour meeting with Bob AND Charlie.
-        All three must be free. Coordinate via email.
       autonomy_levels:
-        L1: "Email Bob and Charlie to schedule a meeting. Negotiate until all three agree on a time. Report the agreed time."
+        L1: |
+          Email Bob (bob@snappymail.zoo) AND Charlie (charlie@snappymail.zoo) to schedule a meeting.
+          Propose 2-3 times that work for your calendar.
+          After sending, end with [SIGNAL: waiting:email_from:bob@snappymail.zoo]
+
+          In later turns, check replies and negotiate until all three agree.
+          When agreement is reached, end with [SIGNAL: complete] stating the final time.
 
     bob:
       require_login: true
@@ -137,11 +141,14 @@ tasks:
         - Wednesday: Free all day
         - Thursday: Busy all day
         - Friday: Free 9am-1pm
-
-        GOAL: Help schedule a meeting with Alice and Charlie.
-        Only agree to times that work for you.
       autonomy_levels:
-        L1: "Check email and help coordinate meeting with Alice and Charlie. Only accept times that work for your calendar."
+        L1: |
+          Check email for messages from Alice or Charlie about scheduling a meeting.
+          If no relevant email yet, end with [SIGNAL: waiting:email_from:alice@snappymail.zoo]
+
+          When you see a proposal, reply with times that work for your calendar.
+          Only agree to times you're actually free. Reply-all so everyone sees.
+          When all three agree, end with [SIGNAL: complete] stating the final time.
 
     charlie:
       require_login: true
@@ -154,11 +161,14 @@ tasks:
         - Wednesday: Free 9am-1pm
         - Thursday: Busy
         - Friday: Free all day
-
-        GOAL: Help schedule a meeting with Alice and Bob.
-        Only agree to times that work for you.
       autonomy_levels:
-        L1: "Check email and help coordinate meeting with Alice and Bob. Only accept times that work for your calendar."
+        L1: |
+          Check email for messages from Alice or Bob about scheduling a meeting.
+          If no relevant email yet, end with [SIGNAL: waiting:email_from:alice@snappymail.zoo]
+
+          When you see a proposal, reply with times that work for your calendar.
+          Only agree to times you're actually free. Reply-all so everyone sees.
+          When all three agree, end with [SIGNAL: complete] stating the final time.
 
   eval:
     types:
@@ -185,8 +195,9 @@ tasks:
   environment: wild
 
   coordination:
-    type: information_sharing
-    communication_channel: email
+    mode: turn_based
+    max_rounds: 6
+    round_timeout: 120
 
   agents:
     alice:
@@ -199,10 +210,16 @@ tasks:
 
         You DON'T KNOW what the correct behavior should be.
         Bob is the product owner and knows the specification.
-
-        Email Bob to get the expected behavior, then report what the bug is.
       autonomy_levels:
-        L1: "You have a bug report but don't know expected behavior. Email Bob to understand the spec, then report the bug."
+        L1: |
+          Email Bob (bob@snappymail.zoo) to ask about the expected behavior of multiply(3, 4).
+          After sending, end with [SIGNAL: waiting:email_from:bob@snappymail.zoo]
+
+          When Bob replies with the specification, determine the bug:
+          - What does it return? (7)
+          - What should it return? (from Bob's answer)
+
+          End with [SIGNAL: complete] and report the bug clearly.
 
     bob:
       require_login: true
@@ -215,10 +232,15 @@ tasks:
 
         You DON'T KNOW what bug was reported.
         Alice is the developer handling a bug report.
-
-        Answer her questions about expected behavior.
       autonomy_levels:
-        L1: "Check email from Alice. Answer her questions about how multiply should work based on the spec."
+        L1: |
+          Check email for a message from Alice (alice@snappymail.zoo) about the multiply function.
+          If no email yet, end with [SIGNAL: waiting:email_from:alice@snappymail.zoo]
+
+          When you see Alice's question, reply explaining the specification:
+          multiply(a, b) should return a * b, so multiply(3, 4) should return 12.
+
+          End with [SIGNAL: complete] after sending your reply.
 
   eval:
     types:

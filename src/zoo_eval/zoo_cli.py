@@ -725,6 +725,49 @@ def get_email_headers(
     return headers
 
 
+def get_email_body(
+    user: str,
+    password: str,
+    uid: int,
+    folder: str = "INBOX",
+) -> str:
+    """
+    Get email body text for a specific message.
+
+    Args:
+        user: Email address
+        password: Email password
+        uid: Message UID
+        folder: Mailbox folder
+
+    Returns:
+        Email body text (plain text portion)
+    """
+    encoded_folder = folder.replace(" ", "%20")
+
+    # Fetch the full message (TEXT section)
+    curl_cmd = [
+        "curl", "-s",
+        "-u", f"{user}:{password}",
+        f"imap://localhost/{encoded_folder};UID={uid};SECTION=TEXT",
+    ]
+
+    result = _docker_compose_exec("stalwart", curl_cmd)
+
+    if result.returncode == 0 and result.stdout:
+        body = result.stdout
+        # Try to decode quoted-printable if present
+        if "=\n" in body or "=20" in body:
+            import quopri
+            try:
+                body = quopri.decodestring(body.encode()).decode("utf-8", errors="replace")
+            except Exception:
+                pass
+        return body.strip()
+
+    return ""
+
+
 def email_exists_in_folder(
     user: str,
     password: str,

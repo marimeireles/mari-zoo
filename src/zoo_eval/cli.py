@@ -321,6 +321,155 @@ def report(
     db.close()
 
 
+@app.command("eval")
+def evaluate(
+    universe: Path = typer.Argument(..., help="Path to universe directory"),
+    task_file: str = typer.Option(..., "--task", "-t", help="Task file name (without .yaml)"),
+    run_id: int = typer.Option(None, "--run", "-r", help="Run ID to re-evaluate (default: latest)"),
+    task_id: list[int] = typer.Option(None, "--id", "-i", help="Task ID(s) to evaluate (default: all in run)"),
+    level: list[str] = typer.Option(None, "--level", "-L", help="Autonomy level(s) to evaluate"),
+    judge_model: str = typer.Option("gpt-4o", "--judge-model", "-j", help="LLM judge model"),
+    db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
+    update: bool = typer.Option(False, "--update", "-u", help="Update results in database"),
+):
+    """Re-run evaluation on existing results without re-running agents.
+
+    Useful for testing evaluator changes or re-evaluating with different criteria.
+    """
+    from .evaluators import evaluate_task, EvalResult
+    from .models import TaskResult, AgentResult
+
+    # Resolve universe path
+    universe_path = Path(universe)
+    if not universe_path.exists():
+        universe_path = Path("pet_to_wild/universes") / universe
+    if not universe_path.exists():
+        console.print(f"[red]Universe not found: {universe}[/red]")
+        raise typer.Exit(1)
+
+    # Load universe and tasks
+    universe_obj = load_universe(universe_path)
+    tasks_dir = universe_path / "tasks"
+    task_file_path = tasks_dir / f"{task_file}.yaml"
+    if not task_file_path.exists():
+        task_file_path = tasks_dir / f"{task_file}.yml"
+    if not task_file_path.exists():
+        console.print(f"[red]Task file not found: {task_file}.yaml[/red]")
+        raise typer.Exit(1)
+
+    tasks = load_tasks(task_file_path)
+    tasks_by_id = {t.task_id: t for t in tasks}
+
+    # Set up database
+    db = ResultsDB(db_path)
+
+    # Get run ID
+    if run_id is None:
+        run_id = db.get_latest_run()
+        if run_id is None:
+            console.print("[red]No runs found in database[/red]")
+            raise typer.Exit(1)
+    console.print(f"Re-evaluating run #{run_id}...")
+
+    # Get results to re-evaluate
+    all_results = db.get_run_results(run_id)
+    if not all_results:
+        console.print(f"[red]No results found for run #{run_id}[/red]")
+        raise typer.Exit(1)
+
+    # Filter by task_id and level if specified
+    task_ids = list(task_id) if task_id else None
+    levels = [lvl.upper() for lvl in level] if level else None
+
+    results_to_eval = []
+    for row in all_results:
+        if task_ids and row["task_id"] not in task_ids:
+            continue
+        if levels and row.get("autonomy_level", "L1") not in levels:
+            continue
+        if row["task_id"] not in tasks_by_id:
+            console.print(f"[yellow]Warning: Task {row['task_id']} not in task file, skipping[/yellow]")
+            continue
+        results_to_eval.append(row)
+
+    if not results_to_eval:
+        console.print("[red]No matching results to evaluate[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"  Evaluating {len(results_to_eval)} result(s)...")
+
+    async def run_evals():
+        eval_results_list = []
+        for row in results_to_eval:
+            task = tasks_by_id[row["task_id"]]
+            autonomy_level = row.get("autonomy_level", "L1")
+
+            # Reconstruct TaskResult from stored data
+            task_result = TaskResult(
+                task_id=row["task_id"],
+                success=bool(row["success"]),
+                agent_answer=row["agent_answer"],
+                final_url=row.get("final_url"),
+                error=row.get("error"),
+                steps=row.get("steps", 0),
+                duration_seconds=row.get("duration_seconds", 0),
+                autonomy_level=autonomy_level,
+            )
+
+            # Get evaluation config
+            evaluation = task.get_evaluation_for_level(autonomy_level)
+
+            # Run evaluators
+            eval_results = await evaluate_task(
+                task_result,
+                evaluation,
+                task=task,
+                universe_name=universe_obj.name,
+                judge_model=judge_model,
+            )
+
+            eval_results_list.append({
+                "task_id": row["task_id"],
+                "level": autonomy_level,
+                "eval_results": eval_results,
+                "passed": all(e.passed for e in eval_results),
+            })
+
+        return eval_results_list
+
+    results = asyncio.run(run_evals())
+
+    # Display results
+    passed_count = sum(1 for r in results if r["passed"])
+    console.print(f"\n[bold]Evaluation Results:[/bold]")
+    console.print(f"  Passed: [green]{passed_count}[/green]/{len(results)}")
+
+    for r in results:
+        status = "[green]PASS[/green]" if r["passed"] else "[red]FAIL[/red]"
+        console.print(f"\n  Task {r['task_id']} ({r['level']}): {status}")
+        for e in r["eval_results"]:
+            eval_status = "[green]✓[/green]" if e.passed else "[red]✗[/red]"
+            console.print(f"    {eval_status} [{e.eval_type.value}] {e.details}")
+
+    # Update database if requested
+    if update:
+        console.print("\n[yellow]Updating database...[/yellow]")
+        for r in results:
+            eval_results_json = json.dumps([
+                {"type": e.eval_type.value, "passed": e.passed, "details": e.details}
+                for e in r["eval_results"]
+            ])
+            db.conn.execute(
+                """UPDATE task_results SET passed = ?, eval_results = ?
+                   WHERE run_id = ? AND task_id = ? AND autonomy_level = ?""",
+                (1 if r["passed"] else 0, eval_results_json, run_id, r["task_id"], r["level"]),
+            )
+        db.conn.commit()
+        console.print("[green]Database updated[/green]")
+
+    db.close()
+
+
 @app.command()
 def reset():
     """Reset Zoo databases to initial state."""

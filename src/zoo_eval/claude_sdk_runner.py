@@ -20,8 +20,17 @@ from claude_agent_sdk import (
 )
 
 from .base_agent_runner import BaseAgentRunner
-from .models import AgentResult, RunConfig, Task, TaskAgentConfig, TaskResult, Universe
+from .models import (
+    AgentResult,
+    CoordinationMode,
+    RunConfig,
+    Task,
+    TaskAgentConfig,
+    TaskResult,
+    Universe,
+)
 from .scenes import SceneManager
+from .turn_based_runner import TurnBasedOrchestrator
 from .zoo import Zoo
 
 # Delay between sequential agent runs to allow SDK async cleanup
@@ -254,21 +263,33 @@ class ClaudeSDKRunner(BaseAgentRunner):
                         print(f"  Skipping task {task.task_id} {autonomy_level} (already completed)")
                         continue
 
-                    # Run agents sequentially (Claude SDK shares MCP server state)
-                    agent_results = []
-                    for i, agent_config in enumerate(agents):
-                        # Force cleanup between queries - SDK has async context issues
-                        gc.collect()
-                        if i > 0:
-                            # Wait between agents for SDK cleanup
-                            await asyncio.sleep(INTER_AGENT_DELAY_SECONDS)
-                        # Run each agent in isolated task to prevent cancel scope leakage
-                        result = await asyncio.create_task(
-                            self._run_single_agent(
-                                agent_config, task, start_url, autonomy_level
-                            )
+                    # Check coordination mode
+                    if task.coordination.mode == CoordinationMode.TURN_BASED:
+                        # Use turn-based orchestrator for multi-round coordination
+                        orchestrator = TurnBasedOrchestrator(
+                            base_runner=self,
+                            max_rounds=task.coordination.max_rounds,
+                            round_timeout=task.coordination.round_timeout,
                         )
-                        agent_results.append(result)
+                        agent_results = await orchestrator.run_coordination_task(
+                            task, agents, start_url, autonomy_level
+                        )
+                    else:
+                        # Sequential execution (default) - each agent runs once
+                        agent_results = []
+                        for i, agent_config in enumerate(agents):
+                            # Force cleanup between queries - SDK has async context issues
+                            gc.collect()
+                            if i > 0:
+                                # Wait between agents for SDK cleanup
+                                await asyncio.sleep(INTER_AGENT_DELAY_SECONDS)
+                            # Run each agent in isolated task to prevent cancel scope leakage
+                            result = await asyncio.create_task(
+                                self._run_single_agent(
+                                    agent_config, task, start_url, autonomy_level
+                                )
+                            )
+                            agent_results.append(result)
 
                     # Aggregate results
                     all_succeeded = all(r.success for r in agent_results)

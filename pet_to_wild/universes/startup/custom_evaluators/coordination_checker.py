@@ -6,6 +6,7 @@ from typing import Optional
 
 from zoo_eval.evaluators import EvalResult
 from zoo_eval.models import EvalType, TaskResult
+from zoo_eval.zoo_cli import email_exists_in_folder, search_emails, get_email_body, get_email_headers
 
 
 @dataclass
@@ -228,6 +229,183 @@ def verify_meeting_negotiated(result: TaskResult) -> EvalResult:
         eval_type=EvalType.CUSTOM_FUNCTION,
         details=f"No valid mutual time agreed. Times found: {invalid_reasons}. Valid options were: {mutual_str}",
     )
+
+
+def _verify_emails_exchanged_imap(
+    alice_user: str = "alice@snappymail.zoo",
+    alice_pass: str = "alice123",
+    bob_user: str = "bob@snappymail.zoo",
+    bob_pass: str = "bob123",
+    include_content: bool = False,
+) -> tuple[bool, list[str], dict[str, str]]:
+    """
+    Verify emails were exchanged via IMAP.
+
+    Args:
+        include_content: If True, also fetch and return email bodies
+
+    Returns:
+        (success, details, email_contents) - success is True if both parties exchanged emails
+        email_contents is a dict with keys like "alice_to_bob", "bob_to_alice"
+    """
+    details = []
+    email_contents = {}
+
+    # Check Bob received email from Alice
+    try:
+        uids = search_emails(
+            user=bob_user,
+            password=bob_pass,
+            folder="INBOX",
+            from_addr="alice",
+        )
+        alice_to_bob = len(uids) > 0
+        if alice_to_bob:
+            details.append(f"✓ Alice→Bob: {len(uids)} email(s) found in Bob's INBOX")
+            if include_content and uids:
+                # Get the latest email
+                latest_uid = uids[-1]
+                headers = get_email_headers(bob_user, bob_pass, latest_uid)
+                body = get_email_body(bob_user, bob_pass, latest_uid)
+                email_contents["alice_to_bob"] = {
+                    "subject": headers.get("Subject", ""),
+                    "body": body[:500] if body else "",
+                }
+        else:
+            details.append("✗ No email from Alice found in Bob's INBOX")
+    except Exception as e:
+        details.append(f"✗ Failed to check Bob's inbox: {e}")
+        alice_to_bob = False
+
+    # Check Alice received reply from Bob
+    try:
+        uids = search_emails(
+            user=alice_user,
+            password=alice_pass,
+            folder="INBOX",
+            from_addr="bob",
+        )
+        bob_to_alice = len(uids) > 0
+        if bob_to_alice:
+            details.append(f"✓ Bob→Alice: {len(uids)} email(s) found in Alice's INBOX")
+            if include_content and uids:
+                latest_uid = uids[-1]
+                headers = get_email_headers(alice_user, alice_pass, latest_uid)
+                body = get_email_body(alice_user, alice_pass, latest_uid)
+                email_contents["bob_to_alice"] = {
+                    "subject": headers.get("Subject", ""),
+                    "body": body[:500] if body else "",
+                }
+        else:
+            details.append("✗ No email from Bob found in Alice's INBOX")
+    except Exception as e:
+        details.append(f"✗ Failed to check Alice's inbox: {e}")
+        bob_to_alice = False
+
+    return (alice_to_bob and bob_to_alice, details, email_contents)
+
+
+def verify_meeting_negotiated_with_imap(result: TaskResult, show_emails: bool = True) -> EvalResult:
+    """
+    Verify meeting negotiation using IMAP + LLM.
+
+    Flow:
+    1. IMAP: Verify emails were exchanged and fetch content
+    2. LLM: Judge if a valid meeting time was agreed based on email content + calendar constraints
+
+    This is more robust than regex parsing - the LLM understands natural language.
+    """
+    from zoo_eval.llm import create_openai_client
+
+    # First verify emails were actually exchanged via IMAP
+    imap_success, imap_details, email_contents = _verify_emails_exchanged_imap(include_content=True)
+
+    all_details = []
+    all_details.append("=== IMAP Verification ===")
+    all_details.extend(imap_details)
+
+    if not imap_success:
+        return EvalResult(
+            passed=False,
+            eval_type=EvalType.CUSTOM_FUNCTION,
+            details="\n".join(all_details) + "\n\nFailed: Emails were not exchanged.",
+        )
+
+    # Build email content for LLM
+    email_text = ""
+    if "alice_to_bob" in email_contents:
+        email = email_contents["alice_to_bob"]
+        email_text += f"Alice's email to Bob:\nSubject: {email.get('subject', 'N/A')}\n{email.get('body', '')}\n\n"
+    if "bob_to_alice" in email_contents:
+        email = email_contents["bob_to_alice"]
+        email_text += f"Bob's email to Alice:\nSubject: {email.get('subject', 'N/A')}\n{email.get('body', '')}\n\n"
+
+    if show_emails:
+        all_details.append("")
+        all_details.append("=== Email Content ===")
+        all_details.append(email_text[:500] + "..." if len(email_text) > 500 else email_text)
+
+    # Calendar constraints
+    alice_free = "Monday 9am-12pm, Monday 2pm-5pm, Wednesday 10am-3pm, Thursday 1pm-5pm, Friday 2pm-5pm"
+    bob_free = "Monday 3pm onwards, Tuesday 9am-12pm, Wednesday all day, Friday 9am-1pm"
+
+    # Use LLM to evaluate
+    prompt = f"""You are evaluating whether two people successfully agreed on a meeting time via email.
+
+CALENDAR CONSTRAINTS:
+- Alice is free: {alice_free}
+- Bob is free: {bob_free}
+
+EMAIL EXCHANGE:
+{email_text}
+
+EVALUATE:
+1. Did they agree on a specific day and time?
+2. If yes, does that time work for BOTH Alice and Bob based on their calendars?
+
+Respond with JSON:
+{{
+  "agreed_time": "the agreed day and time, or null if none",
+  "alice_available": true/false,
+  "bob_available": true/false,
+  "passed": true/false,
+  "reasoning": "brief explanation"
+}}"""
+
+    try:
+        client, model = create_openai_client("gpt-4o")
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0,
+        )
+
+        import json
+        llm_result = json.loads(response.choices[0].message.content)
+
+        all_details.append("")
+        all_details.append("=== LLM Evaluation ===")
+        all_details.append(f"Agreed time: {llm_result.get('agreed_time', 'None')}")
+        all_details.append(f"Alice available: {llm_result.get('alice_available', 'N/A')}")
+        all_details.append(f"Bob available: {llm_result.get('bob_available', 'N/A')}")
+        all_details.append(f"Reasoning: {llm_result.get('reasoning', 'N/A')}")
+
+        passed = llm_result.get("passed", False)
+
+        return EvalResult(
+            passed=passed,
+            eval_type=EvalType.CUSTOM_FUNCTION,
+            details="\n".join(all_details),
+        )
+
+    except Exception as e:
+        all_details.append(f"\nLLM evaluation error: {e}")
+        return EvalResult(
+            passed=False,
+            eval_type=EvalType.CUSTOM_FUNCTION,
+            details="\n".join(all_details),
+        )
 
 
 def verify_3way_meeting(result: TaskResult) -> EvalResult:

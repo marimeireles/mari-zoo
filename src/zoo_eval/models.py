@@ -316,6 +316,37 @@ class Universe:
         return list(services)
 
 
+class CoordinationMode(str, Enum):
+    """Multi-agent coordination mode."""
+
+    SEQUENTIAL = "sequential"  # Run agents once each, in order (default)
+    TURN_BASED = "turn_based"  # Run agents in rounds with wait conditions
+
+
+@dataclass
+class CoordinationConfig:
+    """Configuration for multi-agent coordination."""
+
+    mode: CoordinationMode = CoordinationMode.SEQUENTIAL
+    max_rounds: int = 10  # Maximum rounds for turn-based mode
+    round_timeout: float = 120.0  # Timeout per agent turn in seconds
+
+    @classmethod
+    def from_dict(cls, data: dict | None) -> CoordinationConfig:
+        if not data:
+            return cls()
+
+        mode = CoordinationMode.SEQUENTIAL
+        if data.get("mode") == "turn_based":
+            mode = CoordinationMode.TURN_BASED
+
+        return cls(
+            mode=mode,
+            max_rounds=data.get("max_rounds", 10),
+            round_timeout=data.get("round_timeout", 120.0),
+        )
+
+
 @dataclass
 class Task:
     """A single evaluation task."""
@@ -333,6 +364,8 @@ class Task:
     complexity: TaskComplexity | None = None
     environment: Environment | None = None
     scene_name: str | None = None  # References scene file by name
+    # Multi-agent coordination
+    coordination: CoordinationConfig = field(default_factory=CoordinationConfig)
 
     def get_evaluation_for_level(self, autonomy_level: str) -> Evaluation:
         """Get the evaluation criteria for a specific autonomy level.
@@ -396,6 +429,7 @@ class Task:
             complexity=complexity,
             environment=environment,
             scene_name=data.get("scene"),
+            coordination=CoordinationConfig.from_dict(data.get("coordination")),
         )
 
 

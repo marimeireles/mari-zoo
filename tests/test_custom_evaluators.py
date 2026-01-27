@@ -563,6 +563,81 @@ class TestCoordinationChecker:
             assert eval_result.passed is False
 
 
+class TestIMAPVerification:
+    """Tests for IMAP-based email verification."""
+
+    @pytest.fixture
+    def mock_imap(self):
+        """Mock IMAP functions."""
+        import unittest.mock as mock
+        with mock.patch("pet_to_wild.universes.startup.custom_evaluators.coordination_checker.search_emails") as m:
+            yield m
+
+    def test_imap_both_emails_found(self, mock_imap):
+        """Should pass when both Alice→Bob and Bob→Alice emails found."""
+        from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import _verify_emails_exchanged_imap
+        mock_imap.return_value = [1]  # Return list with one UID
+
+        success, details, contents = _verify_emails_exchanged_imap(include_content=False)
+        assert success is True
+        assert "Alice→Bob" in details[0]
+        assert "Bob→Alice" in details[1]
+        assert "✓" in details[0]
+        assert "✓" in details[1]
+
+    def test_imap_alice_email_missing(self, mock_imap):
+        """Should fail when Alice→Bob email not found."""
+        from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import _verify_emails_exchanged_imap
+        # First call is checking Bob's inbox for Alice's email
+        # Second call is checking Alice's inbox for Bob's email
+        mock_imap.side_effect = [[], [1]]
+
+        success, details, contents = _verify_emails_exchanged_imap(include_content=False)
+        assert success is False
+        assert "✗" in details[0]  # Alice→Bob failed
+        assert "✓" in details[1]  # Bob→Alice passed
+
+    def test_imap_bob_email_missing(self, mock_imap):
+        """Should fail when Bob→Alice email not found."""
+        from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import _verify_emails_exchanged_imap
+        mock_imap.side_effect = [[1], []]
+
+        success, details, contents = _verify_emails_exchanged_imap(include_content=False)
+        assert success is False
+        assert "✓" in details[0]  # Alice→Bob passed
+        assert "✗" in details[1]  # Bob→Alice failed
+
+    def test_imap_both_emails_missing(self, mock_imap):
+        """Should fail when both emails missing."""
+        from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import _verify_emails_exchanged_imap
+        mock_imap.return_value = []
+
+        success, details, contents = _verify_emails_exchanged_imap(include_content=False)
+        assert success is False
+        assert "✗" in details[0]
+        assert "✗" in details[1]
+
+    def test_imap_error_handling(self, mock_imap):
+        """Should handle IMAP errors gracefully."""
+        from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import _verify_emails_exchanged_imap
+        mock_imap.side_effect = Exception("Connection refused")
+
+        success, details, contents = _verify_emails_exchanged_imap(include_content=False)
+        assert success is False
+        assert "Failed" in details[0]
+
+    def test_verify_meeting_with_imap_no_emails(self, mock_imap):
+        """Should fail when no emails were exchanged."""
+        from pet_to_wild.universes.startup.custom_evaluators.coordination_checker import verify_meeting_negotiated_with_imap
+        mock_imap.return_value = []
+
+        result = make_task_result(agent_answer="No meeting scheduled")
+
+        eval_result = verify_meeting_negotiated_with_imap(result, show_emails=False)
+        assert eval_result.passed is False
+        assert "Emails were not exchanged" in eval_result.details
+
+
 class TestEvalResultFormat:
     """Tests to ensure EvalResult format is consistent."""
 
