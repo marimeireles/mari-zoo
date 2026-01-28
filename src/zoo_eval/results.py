@@ -390,12 +390,13 @@ def print_report(db: ResultsDB, run_id: int, detailed: bool = False):
     Args:
         db: Database connection
         run_id: Run ID to report on
-        detailed: If True, show subtask details for each task
+        detailed: If True, show full subtask details with evidence for each autonomy level
     """
     from rich.console import Console
     from rich.table import Table
 
-    console = Console()
+    # Use unlimited width when detailed to avoid truncation
+    console = Console(width=None if detailed else None, force_terminal=True)
     stats = db.get_run_stats(run_id)
 
     # Overall summary line
@@ -479,26 +480,65 @@ def print_report(db: ResultsDB, run_id: int, detailed: bool = False):
         # Show subtask details for each task in this environment
         for task_id in sorted(tasks_by_id.keys()):
             levels = tasks_by_id[task_id]
-            # Use first available level for subtask details
+
+            # Get task name from first available level
+            task_name = ""
             for level in ["L0", "L1", "L2"]:
-                if level not in levels:
-                    continue
-                result = levels[level]
+                if level in levels:
+                    task_name = levels[level].get('task_name', '')
+                    break
 
-                # Get subtask results from DB
-                task_result_id = db.conn.execute(
-                    "SELECT id FROM task_results WHERE run_id = ? AND task_id = ? AND autonomy_level = ?",
-                    (run_id, task_id, level)
-                ).fetchone()
+            # In detailed mode, show subtasks for EACH autonomy level
+            if detailed:
+                console.print(f"\n[bold]Task {task_id}[/bold] - {task_name}")
 
-                if task_result_id:
-                    subtasks = db.get_subtask_results(task_result_id["id"])
-                    if subtasks:
-                        console.print(f"\n[bold]Task {task_id}[/bold] - {result.get('task_name', '')[:60]}")
-                        for s in subtasks:
-                            status = "[green]✓[/green]" if s["passed"] else "[red]✗[/red]"
-                            console.print(f"  {status} {s['subtask_id']}: {s['description'][:70]}")
+                for level in ["L0", "L1", "L2"]:
+                    if level not in levels:
+                        continue
+                    result = levels[level]
+                    score = result.get("score", 0)
+                    color = _score_color(score)
 
-                        if result.get("error"):
-                            console.print(f"  [red]Error: {result['error']}[/red]")
-                break  # Only show subtasks once per task
+                    # Get subtask results from DB for this specific level
+                    task_result_id = db.conn.execute(
+                        "SELECT id FROM task_results WHERE run_id = ? AND task_id = ? AND autonomy_level = ?",
+                        (run_id, task_id, level)
+                    ).fetchone()
+
+                    if task_result_id:
+                        subtasks = db.get_subtask_results(task_result_id["id"])
+                        if subtasks:
+                            console.print(f"\n  [{color}]{level} (score: {score:.2f})[/{color}]")
+                            for s in subtasks:
+                                status = "[green]✓[/green]" if s["passed"] else "[red]✗[/red]"
+                                console.print(f"    {status} {s['subtask_id']}: {s['description']}")
+                                # Show evidence in detailed mode
+                                if s.get("evidence"):
+                                    console.print(f"       [dim]{s['evidence']}[/dim]")
+
+                    if result.get("error"):
+                        console.print(f"    [red]Error: {result['error']}[/red]")
+            else:
+                # Non-detailed: show subtasks once (from first available level)
+                for level in ["L0", "L1", "L2"]:
+                    if level not in levels:
+                        continue
+                    result = levels[level]
+
+                    task_result_id = db.conn.execute(
+                        "SELECT id FROM task_results WHERE run_id = ? AND task_id = ? AND autonomy_level = ?",
+                        (run_id, task_id, level)
+                    ).fetchone()
+
+                    if task_result_id:
+                        subtasks = db.get_subtask_results(task_result_id["id"])
+                        if subtasks:
+                            console.print(f"\n[bold]Task {task_id}[/bold] - {task_name[:60] if len(task_name) > 60 else task_name}")
+                            for s in subtasks:
+                                status = "[green]✓[/green]" if s["passed"] else "[red]✗[/red]"
+                                desc = s['description']
+                                console.print(f"  {status} {s['subtask_id']}: {desc[:70] if len(desc) > 70 else desc}")
+
+                            if result.get("error"):
+                                console.print(f"  [red]Error: {result['error']}[/red]")
+                    break  # Only show subtasks once per task in non-detailed mode
