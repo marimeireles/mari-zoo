@@ -120,6 +120,7 @@ trigger:
   url_contains: "gitea.zoo"  # Case-insensitive substring match
   # OR: url_pattern: "/repos/.*/issues"  # Regex
   method: POST  # Optional: filter by HTTP method
+  wait_for_load: false  # Optional: fire immediately without waiting for page load (default: true)
   timeout: 600  # Max wait seconds (default: 600)
 ```
 
@@ -459,7 +460,7 @@ if __name__ == "__main__":
 ```python
 from zoo_eval.zoo_cli import (
     # Email (via docker compose exec)
-    send_email,              # Send email, returns bool
+    send_email,              # Send email, raises on error
     send_email_with_result,  # Send email, returns CompletedProcess
     check_inbox,             # Check inbox count, returns int or None
 
@@ -468,6 +469,8 @@ from zoo_eval.zoo_cli import (
     gitea_create_repo,       # Create repository
     gitea_add_file,          # Add/update file in repo
     gitea_create_issue,      # Create issue
+    gitea_list_issues,       # List issues in repo
+    gitea_create_comment,    # Create comment on issue
 
     # Focalboard/Kanban (direct REST API)
     focalboard_login,        # Login, returns auth token
@@ -484,7 +487,6 @@ All functions require explicit credentials - there are no hardcoded defaults.
 **Environment Variables:**
 
 - `ZOO_PROXY_PORT`: Proxy port (default: 3128)
-- `ZOO_COMPOSE_PROJECT_NAME`: Override compose project detection
 
 ### Activating Scenes
 

@@ -147,6 +147,10 @@ class SceneManager:
             self._trigger_events[action_id] = asyncio.Event()
         fired_event = self._trigger_events[action_id]
 
+        # Track state for wait_for_load
+        url_matched = {"value": False}
+        load_event = asyncio.Event()
+
         def on_network_request(params, session_id):
             """Handle Network.requestWillBeSent CDP events."""
             request_info = params.get("request", {})
@@ -168,6 +172,17 @@ class SceneManager:
                 matches = True
 
             if matches:
+                if trigger.wait_for_load:
+                    # Mark URL as matched, wait for page load
+                    url_matched["value"] = True
+                else:
+                    # Fire immediately
+                    fired_event.set()
+                    asyncio.create_task(self._run_single_action(action))
+
+        def on_page_load(params, session_id):
+            """Handle Page.loadEventFired CDP events."""
+            if url_matched["value"] and not fired_event.is_set():
                 fired_event.set()
                 asyncio.create_task(self._run_single_action(action))
 
@@ -175,6 +190,11 @@ class SceneManager:
             cdp_session = await browser.get_or_create_cdp_session()
             await cdp_session.cdp_client.send_raw("Network.enable", session_id=cdp_session.session_id)
             cdp_session.cdp_client._event_registry.register("Network.requestWillBeSent", on_network_request)
+
+            # If wait_for_load, also listen for page load event
+            if trigger.wait_for_load:
+                await cdp_session.cdp_client.send_raw("Page.enable", session_id=cdp_session.session_id)
+                cdp_session.cdp_client._event_registry.register("Page.loadEventFired", on_page_load)
         except Exception:
             return
 

@@ -37,6 +37,23 @@ def _get_compose_project() -> str:
     return "the_zoo"
 
 
+def _get_zoo_path() -> str | None:
+    """Get path to the_zoo directory for docker compose commands."""
+    # Check environment variable first
+    if zoo_path := os.environ.get("THE_ZOO_PATH"):
+        return zoo_path
+
+    # Try to find as sibling of zoo-eval
+    from pathlib import Path
+    this_file = Path(__file__).resolve()
+    zoo_eval_root = this_file.parent.parent.parent
+    sibling_path = zoo_eval_root.parent / "the_zoo"
+    if sibling_path.exists() and (sibling_path / "docker-compose.yml").exists():
+        return str(sibling_path)
+
+    return None
+
+
 # URL mappings for WebArena-style placeholders
 URL_MAPPINGS = {
     "__SHOPPING__": "https://onestopshop.zoo",
@@ -90,14 +107,17 @@ class Zoo:
     def _docker_compose(self, *args: str, timeout: int = 60) -> subprocess.CompletedProcess:
         """Run a docker compose command."""
         cmd = ["docker", "compose", "-p", self.project] + list(args)
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        # Run from the_zoo directory if available (required for compose commands)
+        cwd = _get_zoo_path()
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd)
 
     def _docker_compose_exec(
         self, service: str, command: list[str], timeout: int = 30
     ) -> subprocess.CompletedProcess:
         """Run a command inside a docker compose service."""
         cmd = ["docker", "compose", "-p", self.project, "exec", "-T", service] + command
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        cwd = _get_zoo_path()
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd)
 
     def is_running(self) -> bool:
         """Check if Zoo is running and accessible."""

@@ -173,6 +173,7 @@ class Trigger:
     - url_contains: Substring to match in request URL (case-insensitive)
     - url_pattern: Regex pattern to match request URL
     - method: HTTP method to match (GET, POST, etc.) - optional
+    - wait_for_load: Wait for page load event after URL match (default: True)
 
     Poll trigger fields (for type="poll"):
     - poll_endpoint: URL to check periodically
@@ -189,6 +190,7 @@ class Trigger:
     url_contains: str | None = None  # Substring to match in URL
     url_pattern: str | None = None  # Regex pattern to match URL
     method: str | None = None  # HTTP method to match (GET, POST, etc.)
+    wait_for_load: bool = True  # Wait for page load after URL match (default: True)
     # Poll trigger fields
     poll_endpoint: str | None = None  # URL to check
     poll_contains: str | None = None  # Text to look for in response
@@ -204,6 +206,7 @@ class Trigger:
             url_contains=data.get("url_contains"),
             url_pattern=data.get("url_pattern"),
             method=data.get("method"),
+            wait_for_load=data.get("wait_for_load", True),
             poll_endpoint=data.get("poll_endpoint"),
             poll_contains=data.get("poll_contains"),
             poll_interval=data.get("poll_interval", 3.0),
