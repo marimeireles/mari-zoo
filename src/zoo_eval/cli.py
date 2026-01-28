@@ -74,7 +74,7 @@ def run(
     model: str = typer.Option("google/gemini-2.5-flash-lite", "--model", "-m", help="Agent model (auto-detects: '/' → OpenRouter, else OpenAI). Aliases: flash, sonnet"),
     judge_model: str = typer.Option(None, "--judge-model", "-j", help="LLM judge model (default: gpt-4o, auto-detects provider like --model)"),
     shared_browser: bool = typer.Option(False, "--shared-browser", help="All agents share same browser and memory"),
-    level: list[str] = typer.Option(["L1"], "--level", "-L", help="Autonomy level(s) to run: L0, L1, L2 (can specify multiple)"),
+    level: list[str] = typer.Option(None, "--level", "-L", help="Autonomy level(s) to run: L0, L1, L2 (can specify multiple, default: all)"),
     harness: str = typer.Option("browser_use", "--harness", "-H", help="Agent harness: browser_use or claude_sdk"),
     claude_model: str = typer.Option("sonnet", "--claude-model", help="Claude model for claude_sdk harness: opus, sonnet, haiku"),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
@@ -166,7 +166,11 @@ def run(
 
     # Validate and normalize autonomy levels first (needed for resume check)
     valid_levels = {"L0", "L1", "L2"}
-    autonomy_levels = [lvl.upper() for lvl in level]
+    # Default to all levels if none specified
+    if level is None:
+        autonomy_levels = ["L0", "L1", "L2"]
+    else:
+        autonomy_levels = [lvl.upper() for lvl in level]
     invalid = set(autonomy_levels) - valid_levels
     if invalid:
         console.print(f"[red]Invalid autonomy level(s): {invalid}. Valid: L0, L1, L2[/red]")

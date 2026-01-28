@@ -538,6 +538,28 @@ zoo-eval run startup --task devtools --max-steps 60
 
 The `--task` (`-t`) flag is required and specifies the task file name (without .yaml). Use `--id` (`-i`) to run specific task IDs.
 
+### Autonomy Levels
+
+By default, tasks run at **all autonomy levels** (L0, L1, L2). Use `--level` (`-L`) to run specific levels:
+
+- **L0**: Detailed step-by-step instructions
+- **L1**: Goal with suggested method
+- **L2**: Goal only (most autonomous)
+
+```bash
+# Run all levels (default behavior)
+zoo-eval run startup --task email --id 101
+
+# Run only L1 (medium detail instructions)
+zoo-eval run startup --task email --id 101 -L L1
+
+# Run L1 and L2 only
+zoo-eval run startup --task email --id 101 -L L1 -L L2
+
+# Run only L0 (most detailed instructions)
+zoo-eval run startup --task email --id 101 -L L0
+```
+
 ### Agent Harnesses
 
 **browser_use (default)** - Agents run concurrently (each gets its own browser):
