@@ -1,22 +1,38 @@
 """
-Wrapper around The Zoo CLI for seeding and managing Zoo services.
+Direct API implementations for Zoo services.
 
-Calls the_zoo CLI (TypeScript) under the hood instead of reimplementing APIs.
-This ensures a single source of truth for Zoo service interactions.
-
-Required environment:
-- THE_ZOO_PATH: Path to the_zoo repository (default: ../the_zoo relative to zoo-eval)
-- Node.js with tsx installed (for running the TypeScript CLI)
+Uses httpx for HTTP APIs (Gitea, Focalboard) and smtplib/imaplib for email.
+No external dependencies on the_zoo CLI - everything runs natively in Python.
 """
 
-import json
+import base64
 import os
-import re
-import shutil
 import subprocess
 from contextlib import contextmanager
-from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
+
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
+def _get_proxy_port() -> int:
+    """Get the Zoo proxy port from environment or default."""
+    return int(os.environ.get("ZOO_PROXY_PORT", "3128"))
+
+
+def _get_http_client():
+    """Get an httpx client configured for the Zoo proxy."""
+    import httpx
+
+    proxy_port = _get_proxy_port()
+    proxy_url = f"http://localhost:{proxy_port}"
+
+    return httpx.Client(
+        proxy=proxy_url,
+        verify=False,  # Zoo uses self-signed certs
+        timeout=30.0,
+    )
 
 
 # =============================================================================
@@ -82,139 +98,50 @@ class SeedTracker:
 
 
 # =============================================================================
-# The Zoo CLI Wrapper
+# Gitea API (Direct HTTP)
 # =============================================================================
 
-def _get_zoo_cli_path() -> str:
-    """Get the path to the_zoo CLI executable."""
-    # Check environment variable first
-    if zoo_path := os.environ.get("THE_ZOO_PATH"):
-        cli_path = Path(zoo_path) / "cli" / "bin" / "thezoo.ts"
-        if cli_path.exists():
-            return str(cli_path)
+def _gitea_request(
+    endpoint: str,
+    method: str = "GET",
+    body: Optional[dict] = None,
+    username: Optional[str] = None,
+    password: Optional[str] = None,
+) -> Any:
+    """Make an authenticated request to Gitea API."""
+    with _get_http_client() as client:
+        url = f"https://gitea.zoo{endpoint}"
+        auth = (username, password) if username and password else None
 
-    # Try to find it relative to this file (sibling repo)
-    this_file = Path(__file__).resolve()
-    # Go up to zoo-eval root, then to parent, then to the_zoo
-    zoo_eval_root = this_file.parent.parent.parent
-    sibling_path = zoo_eval_root.parent / "the_zoo" / "cli" / "bin" / "thezoo.ts"
-    if sibling_path.exists():
-        return str(sibling_path)
-
-    raise FileNotFoundError(
-        "Could not find the_zoo CLI. Set THE_ZOO_PATH environment variable "
-        "or ensure the_zoo repo is a sibling of zoo-eval."
-    )
-
-
-def _get_tsx_path() -> str:
-    """Get the path to tsx (TypeScript runner)."""
-    # Check if tsx is in PATH
-    tsx = shutil.which("tsx")
-    if tsx:
-        return tsx
-
-    # Check if npx is available as fallback
-    npx = shutil.which("npx")
-    if npx:
-        return npx
-
-    raise FileNotFoundError(
-        "Could not find tsx or npx. Install tsx globally with: npm install -g tsx"
-    )
-
-
-def _get_zoo_instance() -> str | None:
-    """Auto-detect the running Zoo instance name from Docker."""
-    try:
-        result = subprocess.run(
-            ["docker", "ps", "--format", "{{.Names}}", "--filter", "name=caddy"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode == 0 and result.stdout:
-            # Extract project name from container name (e.g., "the_zoo-caddy-1" -> "the_zoo")
-            container = result.stdout.strip().split("\n")[0]
-            parts = container.rsplit("-", 2)
-            if len(parts) >= 2:
-                return parts[0]
-    except Exception:
-        pass
-    return None
-
-
-def _run_zoo_cli(
-    *args: str,
-    timeout: int = 60,
-    check: bool = True,
-) -> subprocess.CompletedProcess:
-    """Run the_zoo CLI with the given arguments.
-
-    Args:
-        *args: CLI arguments (e.g., "gitea", "create-repo", "--name", "test")
-        timeout: Command timeout in seconds
-        check: If True, raise on non-zero exit code
-
-    Returns:
-        CompletedProcess with stdout/stderr
-    """
-    cli_path = _get_zoo_cli_path()
-    tsx_path = _get_tsx_path()
-
-    # Auto-detect instance and inject --instance flag if needed
-    args_list = list(args)
-    if "--instance" not in args_list:
-        instance = _get_zoo_instance()
-        if instance:
-            # Insert --instance after the command name (e.g., "email --instance the_zoo send ...")
-            if len(args_list) >= 1:
-                args_list.insert(1, "--instance")
-                args_list.insert(2, instance)
-
-    # Build command
-    if "npx" in tsx_path:
-        cmd = [tsx_path, "tsx", cli_path] + args_list
-    else:
-        cmd = [tsx_path, cli_path] + args_list
-
-    # Pass environment with ZOO_DEV=1 so the CLI can detect non-CLI instances
-    env = os.environ.copy()
-    env["ZOO_DEV"] = "1"
-
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        cwd=Path(cli_path).parent.parent.parent,  # Run from the_zoo root
-        env=env,
-    )
-
-    if check and result.returncode != 0:
-        raise RuntimeError(
-            f"the_zoo CLI failed: {result.stderr or result.stdout}"
+        response = client.request(
+            method=method,
+            url=url,
+            json=body,
+            auth=auth,
         )
 
-    return result
+        if response.status_code >= 400:
+            # Don't fail on 409 Conflict (already exists)
+            if response.status_code == 409:
+                return {"already_exists": True}
+            raise RuntimeError(f"Gitea API error {response.status_code}: {response.text}")
 
+        if response.text:
+            try:
+                return response.json()
+            except Exception:
+                return response.text
+        return {}
 
-# =============================================================================
-# Gitea API (via the_zoo CLI)
-# =============================================================================
 
 def gitea_list_users(username: str = "admin", password: str = "admin123") -> list[dict]:
-    """
-    List all Gitea users (requires admin).
-
-    Note: The CLI doesn't support custom auth, uses hardcoded admin credentials.
-    The username/password params are kept for API compatibility but ignored.
-    """
-    result = _run_zoo_cli("gitea", "users")
-    # Parse output - CLI outputs human-readable text, not JSON
-    # For now, return empty list as the CLI doesn't support JSON output
-    # TODO: Add --json flag to the_zoo CLI for machine-readable output
-    return []
+    """List all Gitea users (requires admin)."""
+    response = _gitea_request(
+        "/api/v1/admin/users",
+        username=username,
+        password=password,
+    )
+    return response if isinstance(response, list) else []
 
 
 def gitea_create_repo(
@@ -226,36 +153,37 @@ def gitea_create_repo(
     private: bool = False,
     auto_init: bool = True,
 ) -> dict:
-    """
-    Create a Gitea repository.
+    """Create a Gitea repository."""
+    actual_owner = owner or username
 
-    Args:
-        username: Authenticated user's username (used as owner if owner not specified)
-        password: Authenticated user's password (not used - CLI uses owner's default password)
-        name: Repository name
-        owner: Owner (org or user name). If None, uses username.
-        description: Repository description
-        private: Whether the repo is private
-        auto_init: Initialize with README
+    # Check if owner is an org
+    endpoint = "/api/v1/user/repos"
+    auth_user, auth_pass = username, password
 
-    Returns:
-        Empty dict (CLI doesn't return JSON)
-    """
-    args = [
-        "gitea", "create-repo",
-        "--name", name,
-        "--owner", owner or username,
-    ]
+    try:
+        org_check = _gitea_request(
+            f"/api/v1/orgs/{actual_owner}",
+            username="admin",
+            password="admin123",
+        )
+        if org_check.get("id"):
+            endpoint = f"/api/v1/orgs/{actual_owner}/repos"
+            auth_user, auth_pass = "admin", "admin123"
+    except Exception:
+        pass  # Not an org, use user endpoint
 
-    if description:
-        args.extend(["--description", description])
-    if private:
-        args.append("--private")
-    if not auto_init:
-        args.append("--no-auto-init")
-
-    _run_zoo_cli(*args)
-    return {}
+    return _gitea_request(
+        endpoint,
+        method="POST",
+        body={
+            "name": name,
+            "description": description,
+            "private": private,
+            "auto_init": auto_init,
+        },
+        username=auth_user,
+        password=auth_pass,
+    )
 
 
 def gitea_add_file(
@@ -268,36 +196,21 @@ def gitea_add_file(
     message: str = "",
     branch: str = "main",
 ) -> dict:
-    """
-    Add or update a file in a Gitea repository.
+    """Add or update a file in a Gitea repository."""
+    # Content must be base64 encoded
+    content_b64 = base64.b64encode(content.encode()).decode()
 
-    Args:
-        username: Authenticated user's username (not used - CLI uses owner's password)
-        password: Authenticated user's password (not used)
-        owner: Repository owner
-        repo: Repository name
-        path: File path in repo
-        content: File content
-        message: Commit message
-        branch: Target branch
-
-    Returns:
-        Empty dict (CLI doesn't return JSON)
-    """
-    args = [
-        "gitea", "add-file",
-        "--owner", owner,
-        "--repo", repo,
-        "--path", path,
-        "--content", content,
-        "--branch", branch,
-    ]
-
-    if message:
-        args.extend(["--message", message])
-
-    _run_zoo_cli(*args)
-    return {}
+    return _gitea_request(
+        f"/api/v1/repos/{owner}/{repo}/contents/{path}",
+        method="POST",
+        body={
+            "content": content_b64,
+            "message": message or f"Add {path}",
+            "branch": branch,
+        },
+        username=username,
+        password=password,
+    )
 
 
 def gitea_create_issue(
@@ -308,32 +221,17 @@ def gitea_create_issue(
     title: str,
     body: str = "",
 ) -> dict:
-    """
-    Create an issue in a Gitea repository.
-
-    Args:
-        username: Authenticated user's username (not used - CLI uses owner's password)
-        password: Authenticated user's password (not used)
-        owner: Repository owner
-        repo: Repository name
-        title: Issue title
-        body: Issue body
-
-    Returns:
-        Empty dict (CLI doesn't return JSON)
-    """
-    args = [
-        "gitea", "create-issue",
-        "--owner", owner,
-        "--repo", repo,
-        "--title", title,
-    ]
-
-    if body:
-        args.extend(["--body", body])
-
-    _run_zoo_cli(*args)
-    return {}
+    """Create an issue in a Gitea repository."""
+    return _gitea_request(
+        f"/api/v1/repos/{owner}/{repo}/issues",
+        method="POST",
+        body={
+            "title": title,
+            "body": body,
+        },
+        username=username,
+        password=password,
+    )
 
 
 def gitea_list_issues(
@@ -342,14 +240,13 @@ def gitea_list_issues(
     owner: str,
     repo: str,
 ) -> list[dict]:
-    """
-    List issues in a Gitea repository.
-
-    Note: The CLI doesn't have a list-issues command yet.
-    TODO: Add to the_zoo CLI
-    """
-    # Not implemented in the_zoo CLI
-    return []
+    """List issues in a Gitea repository."""
+    response = _gitea_request(
+        f"/api/v1/repos/{owner}/{repo}/issues",
+        username=username,
+        password=password,
+    )
+    return response if isinstance(response, list) else []
 
 
 def gitea_create_comment(
@@ -360,59 +257,91 @@ def gitea_create_comment(
     issue_number: int,
     body: str,
 ) -> dict:
-    """
-    Create a comment on a Gitea issue.
-
-    Note: The CLI doesn't have a create-comment command yet.
-    TODO: Add to the_zoo CLI
-    """
-    # Not implemented in the_zoo CLI
-    raise NotImplementedError("gitea_create_comment not yet available in the_zoo CLI")
-
-
-# =============================================================================
-# Focalboard (Kanban) API (via the_zoo CLI)
-# =============================================================================
-
-def focalboard_login(username: str, password: str) -> str:
-    """
-    Login to Focalboard and get auth token.
-
-    Returns:
-        Auth token string (parsed from CLI output)
-    """
-    result = _run_zoo_cli(
-        "kanban", "login",
-        "--username", username,
-        "--password", password,
+    """Create a comment on a Gitea issue."""
+    return _gitea_request(
+        f"/api/v1/repos/{owner}/{repo}/issues/{issue_number}/comments",
+        method="POST",
+        body={"body": body},
+        username=username,
+        password=password,
     )
 
-    # Parse token from output like "Token: abc123..."
-    match = re.search(r"Token:\s+(\S+)", result.stdout)
-    if match:
-        return match.group(1)
 
-    raise ValueError(f"Could not parse token from login output: {result.stdout}")
+# =============================================================================
+# Focalboard (Kanban) API (Direct HTTP)
+# =============================================================================
+
+def _focalboard_request(
+    endpoint: str,
+    method: str = "GET",
+    body: Optional[dict] = None,
+    token: Optional[str] = None,
+) -> Any:
+    """Make a request to Focalboard API."""
+    with _get_http_client() as client:
+        url = f"http://focalboard.zoo{endpoint}"
+        headers = {
+            "Content-Type": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        response = client.request(
+            method=method,
+            url=url,
+            json=body,
+            headers=headers,
+        )
+
+        if response.status_code >= 400:
+            raise RuntimeError(f"Focalboard API error {response.status_code}: {response.text}")
+
+        if response.text:
+            try:
+                return response.json()
+            except Exception:
+                return response.text
+        return {}
+
+
+def focalboard_login(username: str, password: str) -> str:
+    """Login to Focalboard and get auth token."""
+    response = _focalboard_request(
+        "/api/v2/login",
+        method="POST",
+        body={
+            "type": "normal",
+            "username": username,
+            "password": password,
+        },
+    )
+
+    if response.get("token"):
+        return response["token"]
+
+    raise ValueError(f"Login failed: {response}")
 
 
 def focalboard_get_teams(token: str) -> list[dict]:
-    """Get all teams.
-
-    Note: The CLI doesn't expose this directly.
-    """
-    # Not directly available via CLI
-    return []
+    """Get all teams."""
+    response = _focalboard_request("/api/v2/teams", token=token)
+    return response if isinstance(response, list) else []
 
 
 def focalboard_list_boards(token: str, team_id: Optional[str] = None) -> list[dict]:
-    """
-    List all boards.
+    """List all boards."""
+    # Get team ID if not provided
+    if not team_id:
+        teams = focalboard_get_teams(token)
+        if teams:
+            team_id = teams[0].get("id")
 
-    Note: Token is ignored - CLI uses its own auth.
-    """
-    result = _run_zoo_cli("kanban", "boards")
-    # Parse output - returns human-readable text
-    return []
+    if not team_id:
+        return []
+
+    response = _focalboard_request(f"/api/v2/teams/{team_id}/boards", token=token)
+    return response if isinstance(response, list) else []
 
 
 def focalboard_create_board(
@@ -420,30 +349,26 @@ def focalboard_create_board(
     title: str,
     team_id: Optional[str] = None,
 ) -> dict:
-    """
-    Create a Focalboard board.
+    """Create a Focalboard board."""
+    # Get team ID if not provided
+    if not team_id:
+        teams = focalboard_get_teams(token)
+        if teams:
+            team_id = teams[0].get("id")
 
-    Args:
-        token: Auth token (ignored - CLI handles auth)
-        title: Board title
-        team_id: Team ID (optional - uses default)
+    if not team_id:
+        raise ValueError("No team ID available")
 
-    Returns:
-        Dict with board info (parsed from CLI output)
-    """
-    args = ["kanban", "create-board", "--title", title]
-
-    if team_id:
-        args.extend(["--team", team_id])
-
-    result = _run_zoo_cli(*args)
-
-    # Try to parse board ID from output
-    match = re.search(r"ID:\s+(\S+)", result.stdout)
-    if match:
-        return {"id": match.group(1), "title": title}
-
-    return {"title": title}
+    return _focalboard_request(
+        "/api/v2/boards",
+        method="POST",
+        body={
+            "title": title,
+            "teamId": team_id,
+            "type": "O",  # Open board
+        },
+        token=token,
+    )
 
 
 def focalboard_create_card(
@@ -452,49 +377,55 @@ def focalboard_create_card(
     title: str,
     description: str = "",
 ) -> dict:
-    """
-    Create a card on a Focalboard board.
-
-    Args:
-        token: Auth token (ignored - CLI handles auth)
-        board_id: Board ID
-        title: Card title
-        description: Card description (not yet supported in CLI)
-
-    Returns:
-        Dict with card info
-    """
-    result = _run_zoo_cli(
-        "kanban", "create-card",
-        "--board", board_id,
-        "--title", title,
+    """Create a card on a Focalboard board."""
+    return _focalboard_request(
+        "/api/v2/boards/" + board_id + "/blocks",
+        method="POST",
+        body=[{
+            "type": "card",
+            "title": title,
+            "boardId": board_id,
+            "fields": {
+                "properties": {},
+                "contentOrder": [],
+            },
+        }],
+        token=token,
     )
-
-    # Try to parse card ID from output
-    match = re.search(r"ID:\s+(\S+)", result.stdout)
-    if match:
-        return {"id": match.group(1), "title": title}
-
-    return {"title": title}
 
 
 def focalboard_list_cards(token: str, board_id: str, limit: int = 100) -> list[dict]:
-    """
-    List cards on a board.
-
-    Note: Token is ignored - CLI handles auth.
-    """
-    result = _run_zoo_cli(
-        "kanban", "cards",
-        "--board", board_id,
-        "--limit", str(limit),
+    """List cards on a board."""
+    response = _focalboard_request(
+        f"/api/v2/boards/{board_id}/blocks?type=card",
+        token=token,
     )
-    return []
+    result = response if isinstance(response, list) else []
+    return result[:limit]
 
 
 # =============================================================================
-# Email API (via the_zoo CLI)
+# Email API (Direct SMTP/IMAP)
 # =============================================================================
+
+def _get_docker_project() -> str | None:
+    """Auto-detect the running Zoo Docker Compose project name."""
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}", "--filter", "name=stalwart"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and result.stdout:
+            container = result.stdout.strip().split("\n")[0]
+            parts = container.rsplit("-", 2)
+            if len(parts) >= 2:
+                return parts[0]
+    except Exception:
+        pass
+    return None
+
 
 def send_email(
     from_addr: str,
@@ -504,33 +435,41 @@ def send_email(
     password: str,
     html: bool = False,
 ) -> None:
-    """
-    Send an email via SMTP.
+    """Send an email via SMTP using docker exec + swaks.
 
-    Args:
-        from_addr: Sender email address
-        to_addr: Recipient email address
-        subject: Email subject
-        body: Email body text
-        password: Sender's password
-        html: Whether body is HTML
-
-    Raises:
-        RuntimeError: If email sending fails
+    Uses swaks inside the stalwart container for reliable delivery.
     """
-    args = [
-        "email", "send",
-        "--from", from_addr,
+    project = _get_docker_project()
+    if not project:
+        raise RuntimeError("Could not detect Zoo Docker project")
+
+    # Build swaks command
+    swaks_args = [
+        "swaks",
         "--to", to_addr,
-        "--subject", subject,
-        "--body", body,
-        "--password", password,
+        "--from", from_addr,
+        "--server", "stalwart:587",
+        "--auth-user", from_addr,
+        "--auth-password", password,
+        "--header", f"Subject: {subject}",
+        "--tls",
     ]
 
     if html:
-        args.append("--html")
+        swaks_args.extend(["--add-header", "Content-Type: text/html"])
 
-    _run_zoo_cli(*args)
+    swaks_args.extend(["--body", body])
+
+    # Run via docker exec
+    result = subprocess.run(
+        ["docker", "compose", "-p", project, "exec", "-T", "stalwart"] + swaks_args,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to send email: {result.stderr or result.stdout}")
 
 
 def send_email_with_result(
@@ -543,27 +482,38 @@ def send_email_with_result(
     max_retries: int = 15,
     retry_delay: float = 3.0,
 ) -> subprocess.CompletedProcess:
-    """
-    Send an email and return full result (for debugging).
-
-    Note: Retry logic is handled by the caller since CLI doesn't support retries.
-    """
+    """Send an email and return full result (for debugging)."""
     import time
 
-    args = [
-        "email", "send",
-        "--from", from_addr,
+    project = _get_docker_project()
+    if not project:
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr="Could not detect Zoo Docker project",
+        )
+
+    swaks_args = [
+        "swaks",
         "--to", to_addr,
-        "--subject", subject,
-        "--body", body,
-        "--password", password,
+        "--from", from_addr,
+        "--server", "stalwart:587",
+        "--auth-user", from_addr,
+        "--auth-password", password,
+        "--header", f"Subject: {subject}",
+        "--tls",
     ]
 
     if html:
-        args.append("--html")
+        swaks_args.extend(["--add-header", "Content-Type: text/html"])
+
+    swaks_args.extend(["--body", body])
+
+    cmd = ["docker", "compose", "-p", project, "exec", "-T", "stalwart"] + swaks_args
 
     for attempt in range(max_retries):
-        result = _run_zoo_cli(*args, check=False)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if result.returncode == 0:
             return result
         # Retry on connection errors
@@ -577,30 +527,27 @@ def send_email_with_result(
 
 
 def check_inbox(user: str, password: str, folder: str = "INBOX") -> Optional[int]:
-    """
-    Check inbox message count.
+    """Check inbox message count using docker exec + curl."""
+    project = _get_docker_project()
+    if not project:
+        return None
 
-    Args:
-        user: Email address
-        password: Email password
-        folder: Mailbox folder (default: INBOX)
+    try:
+        cmd = [
+            "docker", "compose", "-p", project, "exec", "-T", "stalwart",
+            "curl", "-s", "-u", f"{user}:{password}",
+            f"imap://localhost/{folder}",
+            "--request", f"EXAMINE {folder}",
+        ]
 
-    Returns:
-        Number of messages in inbox, or None if check failed
-    """
-    result = _run_zoo_cli(
-        "email", "inbox",
-        "--user", user,
-        "--password", password,
-        "--folder", folder,
-        "--limit", "0",  # Just get count
-        check=False,
-    )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
-    if result.returncode == 0 and result.stdout:
-        # Parse "Messages: N" from output
-        match = re.search(r"Messages:\s+(\d+)", result.stdout)
-        if match:
-            return int(match.group(1))
+        if result.returncode == 0:
+            import re
+            match = re.search(r"\* (\d+) EXISTS", result.stdout)
+            if match:
+                return int(match.group(1))
+    except Exception:
+        pass
 
     return None
