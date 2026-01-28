@@ -25,7 +25,7 @@ export OPENAI_JUDGE_MODEL=gpt-4o
 # Start The Zoo
 npx the_zoo start
 
-# Run a single task (L1 autonomy level by default)
+# Run a single task (runs all autonomy levels by default)
 uv run zoo-eval run startup --task email --id 101
 
 # Watch in browser (non-headless)
@@ -54,21 +54,7 @@ uv run zoo-eval run startup --task email --id 101 --judge-model gpt-4o
 
 ## Autonomy Levels
 
-Tasks can run at different autonomy levels (L0=detailed steps, L1=goal+method, L2=goal only):
-
-```bash
-# Run only L1 (default - balanced)
-uv run zoo-eval run startup --task email --id 101
-
-# Run only L0 (most detailed instructions)
-uv run zoo-eval run startup --task email --id 101 --level L0
-
-# Run multiple levels
-uv run zoo-eval run startup --task email --id 101 -L L1 -L L2
-
-# Run all levels (full benchmark)
-uv run zoo-eval run startup --task email --id 101 -L L0 -L L1 -L L2
-```
+Tasks run at all autonomy levels by default. See [Benchmark Guide](docs/benchmark_guide.md#autonomy-levels) for details.
 
 ## Other Options
 

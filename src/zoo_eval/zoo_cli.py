@@ -124,6 +124,26 @@ def _get_tsx_path() -> str:
     )
 
 
+def _get_zoo_instance() -> str | None:
+    """Auto-detect the running Zoo instance name from Docker."""
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}", "--filter", "name=caddy"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and result.stdout:
+            # Extract project name from container name (e.g., "the_zoo-caddy-1" -> "the_zoo")
+            container = result.stdout.strip().split("\n")[0]
+            parts = container.rsplit("-", 2)
+            if len(parts) >= 2:
+                return parts[0]
+    except Exception:
+        pass
+    return None
+
+
 def _run_zoo_cli(
     *args: str,
     timeout: int = 60,
@@ -142,11 +162,25 @@ def _run_zoo_cli(
     cli_path = _get_zoo_cli_path()
     tsx_path = _get_tsx_path()
 
+    # Auto-detect instance and inject --instance flag if needed
+    args_list = list(args)
+    if "--instance" not in args_list:
+        instance = _get_zoo_instance()
+        if instance:
+            # Insert --instance after the command name (e.g., "email --instance the_zoo send ...")
+            if len(args_list) >= 1:
+                args_list.insert(1, "--instance")
+                args_list.insert(2, instance)
+
     # Build command
     if "npx" in tsx_path:
-        cmd = [tsx_path, "tsx", cli_path] + list(args)
+        cmd = [tsx_path, "tsx", cli_path] + args_list
     else:
-        cmd = [tsx_path, cli_path] + list(args)
+        cmd = [tsx_path, cli_path] + args_list
+
+    # Pass environment with ZOO_DEV=1 so the CLI can detect non-CLI instances
+    env = os.environ.copy()
+    env["ZOO_DEV"] = "1"
 
     result = subprocess.run(
         cmd,
@@ -154,6 +188,7 @@ def _run_zoo_cli(
         text=True,
         timeout=timeout,
         cwd=Path(cli_path).parent.parent.parent,  # Run from the_zoo root
+        env=env,
     )
 
     if check and result.returncode != 0:

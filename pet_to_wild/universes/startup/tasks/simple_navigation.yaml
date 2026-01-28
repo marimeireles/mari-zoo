@@ -23,3 +23,47 @@ tasks:
     answers:
       must_include:
         - zoo
+
+- id: 2
+  sites: [auth.zoo, snappymail.zoo]
+  intent: "Log in and check your email"
+  start_url: "https://home.zoo"
+  compatible_universes: [startup]
+  require_reset: false
+  scene: auth_email_trigger
+  complexity: atomic
+  environment: domesticated
+
+  agents:
+    alice:
+      require_login: false
+      autonomy_levels:
+        L1: "First go to auth.zoo, then log in to snappymail.zoo and check your email. Tell me what emails you have."
+
+  eval:
+    types:
+      - string_match
+    answers:
+      must_include: [test]
+
+- id: 3
+  sites: [gitea.zoo, snappymail.zoo]
+  intent: "Create an issue then check email"
+  start_url: "https://gitea.zoo"
+  compatible_universes: [startup]
+  require_reset: false
+  scene: poll_test_trigger
+  complexity: atomic
+  environment: domesticated
+
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L1: "Go to your test-repo repository and create an issue titled 'test issue'. Then check your snappymail inbox and tell me what emails you received."
+
+  eval:
+    types:
+      - string_match
+    answers:
+      must_include: [test]

@@ -54,7 +54,8 @@ class AgentRunner(BaseAgentRunner):
         )
 
     async def _run_single_agent(
-        self, agent_config: TaskAgentConfig, task: Task, start_url: str, autonomy_level: str = "L1"
+        self, agent_config: TaskAgentConfig, task: Task, start_url: str, autonomy_level: str = "L1",
+        scene_manager: SceneManager | None = None
     ) -> AgentResult:
         """Run a single agent and return its result."""
         from browser_use import Agent
@@ -82,8 +83,16 @@ class AgentRunner(BaseAgentRunner):
 
             # Closure to capture page HTML at each step
             last_page_html = {'html': None, 'url': None}
+            page_attached = {'done': False}
 
             async def step_hook(agent_instance):
+                # Attach scene manager on first step (when page exists)
+                if scene_manager and not page_attached['done']:
+                    try:
+                        await scene_manager.attach_to_browser(browser)
+                        page_attached['done'] = True
+                    except Exception:
+                        pass
                 """Capture page HTML after each step."""
                 try:
                     cdp_session = await agent_instance.browser_session.get_or_create_cdp_session()
@@ -321,22 +330,7 @@ class AgentRunner(BaseAgentRunner):
         self, tasks: list[Task]
     ) -> list[TaskResult]:
         """Run tasks with their defined agents."""
-        # Collect all sites needed by tasks
-        services = []
-        if self.universe:
-            all_sites = set()
-            for task in tasks:
-                all_sites.update(task.sites)
-            services = self.universe.get_services_for_sites(list(all_sites))
-
-        # Restart only needed services in correct order
-        self.zoo.restart(services if services else None)
-
-        # Wait for services to be healthy
-        if services:
-            self.zoo.wait_for_services(services, timeout=120, verbose=True)
-
-        # Reset if any task requires it
+        # Reset only if explicitly requested by a task
         if any(t.require_reset for t in tasks):
             self.zoo.reset_databases()
 
@@ -350,7 +344,7 @@ class AgentRunner(BaseAgentRunner):
             start_url = self.zoo.resolve_url(task.start_url)
             task_start_time = time.time()
 
-            # Activate scene once per task (before autonomy level loop)
+            # Set up scene manager (runs setup scripts before browser starts)
             # NOTE: Scene state persists across autonomy levels. This means:
             # - Setup scripts (e.g., seeding emails) run once
             # - L0 sees fresh state, L1/L2 see accumulated state (e.g., emails marked as read)
@@ -359,7 +353,8 @@ class AgentRunner(BaseAgentRunner):
             if task.scene_name:
                 universe_sites = self.universe.sites if self.universe else []
                 scene_manager = SceneManager(self.zoo, self.universe_path, universe_sites)
-                await scene_manager.load_and_activate_scene(task.scene_name, task_start_time)
+                await scene_manager.load_and_setup(task.scene_name)
+                scene_manager.start_time = task_start_time
 
             try:
                 # Get agents list from task
@@ -392,7 +387,7 @@ class AgentRunner(BaseAgentRunner):
                                         error=f"Start trigger timed out for agent {agent_config.name}",
                                         duration_seconds=0.0,
                                     )
-                            return await self._run_single_agent(agent_config, task, start_url, autonomy_level)
+                            return await self._run_single_agent(agent_config, task, start_url, autonomy_level, scene_manager)
 
                         agent_results = await asyncio.gather(*[run_agent(a) for a in agents])
 

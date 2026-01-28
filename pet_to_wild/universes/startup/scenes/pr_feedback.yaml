@@ -10,10 +10,9 @@ setup:
 # Actions with their own triggers
 actions:
   - trigger:
-      type: event
-      site: gitea.zoo
-      event_category: AJAX
-      event_match: "/pulls"
+      type: request
+      url_contains: "/pulls"
+      method: POST
     type: script
     script_path: "scripts/send_senior_pr_feedback.py"
     description: "Senior sends email asking for input validation"
@@ -21,8 +20,6 @@ actions:
 # Agents spawned by triggers
 agents:
   - trigger:
-      type: event
-      site: gitea.zoo
-      event_category: AJAX
-      event_match: "/pulls"
+      type: request
+      url_contains: "/pulls"
     name: bob

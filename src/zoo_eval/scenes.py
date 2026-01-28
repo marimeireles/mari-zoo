@@ -4,84 +4,29 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import requests
-import urllib3
-import yaml
+import httpx
 
 from .models import Scene, Trigger, ActionPayload, AgentTrigger, load_scene
-from .matomo import get_matomo_client
-
-# Suppress SSL warnings for Zoo's self-signed certs
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 if TYPE_CHECKING:
     from .zoo import Zoo
 
-
-def _get_proxy_url() -> str:
-    """Get the Zoo proxy URL."""
-    port = os.environ.get("ZOO_PROXY_PORT", "3128")
-    return f"http://localhost:{port}"
-
-
-def warmup_sites(sites: list[str], timeout: int = 30):
-    """Make HTTP requests to all sites to ensure they're loaded.
-
-    Many Zoo services are lazy-loaded and only fully initialize
-    when first accessed. This warms them up before running scripts.
-    """
-    if not sites:
-        return
-
-    proxy_url = _get_proxy_url()
-    proxies = {"http": proxy_url, "https": proxy_url}
-
-    print(f"Warming up {len(sites)} sites...")
-    for site in sites:
-        url = f"https://{site}"
-        try:
-            requests.get(url, proxies=proxies, timeout=timeout, verify=False)
-        except Exception as e:
-            print(f"  Warning: Failed to warm up {site}: {e}")
-
-
-def get_default_project() -> str:
-    """Get the default Zoo project name from running containers or environment."""
-    # First check environment variable
-    env_project = os.environ.get("ZOO_COMPOSE_PROJECT_NAME")
-    if env_project:
-        return env_project
-
-    # Try to detect from running containers
-    try:
-        result = subprocess.run(
-            ["docker", "ps", "--format", "{{.Names}}", "--filter", "name=zoo"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0 and result.stdout:
-            # Extract project name from first container (e.g., "thezoo-cli-instance-default-v0-7-0-proxy-1")
-            first_container = result.stdout.strip().split("\n")[0]
-            # Project name is everything before the last service name
-            parts = first_container.rsplit("-", 2)
-            if len(parts) >= 2:
-                return "-".join(parts[:-2])  # Remove service name and replica number
-    except Exception:
-        pass
-
-    # Fallback to common default
-    return "the_zoo"
-
+# Type alias - browser_use uses its own Page wrapper, not Playwright
+Page = object
 
 
 class SceneManager:
-    """Manages scene activation and verification."""
+    """Manages scene activation and verification.
+
+    Supports CDP-based request triggers that fire when the browser
+    makes requests matching specified URL patterns.
+    """
 
     def __init__(self, zoo: Zoo, universe_path: Path | None = None, universe_sites: list[str] | None = None):
         self.zoo = zoo
@@ -92,6 +37,8 @@ class SceneManager:
         self.actions_log: list[dict] = []  # Track all actions for verification
         self._action_lock = asyncio.Lock()  # Prevent concurrent action execution
         self._scene: Scene | None = None  # Current active scene
+        self._browsers: list = []  # Browser instances for CDP triggers
+        self._trigger_events: dict[str, asyncio.Event] = {}  # Track fired triggers by action id
 
     def get_agent_triggers(self) -> list[AgentTrigger]:
         """Get agent triggers from the active scene."""
@@ -119,37 +66,216 @@ class SceneManager:
         # No trigger for this agent = start immediately
         return True
 
+    async def load_and_setup(self, scene_name: str) -> Scene:
+        """Load a scene and run setup scripts.
+
+        This should be called BEFORE the browser is created.
+        Call attach_to_browser() after browser is ready to enable triggers.
+
+        Args:
+            scene_name: Name of the scene file (without .yaml extension)
+        """
+        if self.universe_path is None:
+            raise ValueError("universe_path must be set to load scenes")
+
+        scenes_dir = self.universe_path / "scenes"
+        scene_path = scenes_dir / f"{scene_name}.yaml"
+
+        if not scene_path.exists():
+            raise FileNotFoundError(f"Scene file not found: {scene_path}")
+
+        scene = load_scene(scene_path)
+        self._scene = scene
+
+        # Run setup actions (before browser starts)
+        await self._run_actions(scene.setup, "setup script")
+
+        return scene
+
+    async def attach_to_browser(self, browser):
+        """Attach to a browser to enable CDP-based triggers.
+
+        Can be called multiple times for multi-agent scenarios.
+        Each browser will have listeners attached for request triggers.
+
+        Args:
+            browser: browser_use Browser instance
+        """
+        self._browsers.append(browser)
+
+        if self._scene is None:
+            return
+
+        # First browser attachment: set up non-browser-specific triggers
+        is_first_browser = len(self._browsers) == 1
+
+        for action in self._scene.actions:
+            action_id = f"{action.script_path}_{id(action)}"
+
+            if action.trigger is None:
+                if is_first_browser:
+                    await self._run_single_action(action)
+            elif action.trigger.trigger_type == "request":
+                await self._setup_request_trigger_cdp(action, browser, action_id)
+            elif action.trigger.trigger_type == "poll":
+                if is_first_browser:
+                    task = asyncio.create_task(self._setup_poll_trigger(action, action_id))
+                    self.active_tasks.append(task)
+            elif action.trigger.trigger_type == "time":
+                if is_first_browser:
+                    if action.trigger.delay == 0:
+                        await self._run_single_action(action)
+                    else:
+                        task = asyncio.create_task(self._schedule_time_action(action))
+                        self.active_tasks.append(task)
+            elif action.trigger.trigger_type == "page_load":
+                if is_first_browser:
+                    await self._run_single_action(action)
+
+    async def _setup_request_trigger_cdp(self, action: ActionPayload, browser, action_id: str):
+        """Set up a CDP Network event listener for HTTP requests."""
+        if not action.trigger:
+            return
+
+        trigger = action.trigger
+        url_pattern = trigger.url_contains or trigger.url_pattern
+        if not url_pattern:
+            return
+
+        # Create or get shared event for this action (across all browsers)
+        if action_id not in self._trigger_events:
+            self._trigger_events[action_id] = asyncio.Event()
+        fired_event = self._trigger_events[action_id]
+
+        def on_network_request(params, session_id):
+            """Handle Network.requestWillBeSent CDP events."""
+            request_info = params.get("request", {})
+            url = request_info.get("url", "")
+            method = request_info.get("method", "GET")
+
+            if fired_event.is_set():
+                return  # Already fired
+
+            # Check method if specified
+            if trigger.method and method.upper() != trigger.method.upper():
+                return
+
+            # Check URL pattern
+            matches = False
+            if trigger.url_contains and trigger.url_contains.lower() in url.lower():
+                matches = True
+            elif trigger.url_pattern and re.search(trigger.url_pattern, url):
+                matches = True
+
+            if matches:
+                fired_event.set()
+                asyncio.create_task(self._run_single_action(action))
+
+        try:
+            cdp_session = await browser.get_or_create_cdp_session()
+            await cdp_session.cdp_client.send_raw("Network.enable", session_id=cdp_session.session_id)
+            cdp_session.cdp_client._event_registry.register("Network.requestWillBeSent", on_network_request)
+        except Exception:
+            return
+
+        # Set up timeout task
+        async def timeout_watcher():
+            try:
+                await asyncio.wait_for(fired_event.wait(), timeout=trigger.timeout)
+            except asyncio.TimeoutError:
+                pass
+
+        task = asyncio.create_task(timeout_watcher())
+        self.active_tasks.append(task)
+
+    async def _setup_poll_trigger(self, action: ActionPayload, action_id: str):
+        """Poll an endpoint until condition is met."""
+        if not action.trigger:
+            return
+
+        trigger = action.trigger
+        if not trigger.poll_endpoint:
+            print(f"Poll trigger missing poll_endpoint")
+            return
+
+        # Track this trigger
+        if action_id not in self._trigger_events:
+            self._trigger_events[action_id] = asyncio.Event()
+        fired_event = self._trigger_events[action_id]
+
+        elapsed = 0.0
+        proxy_url = os.environ.get("ZOO_PROXY_URL", "http://localhost:3128")
+
+        async with httpx.AsyncClient(proxy=proxy_url, verify=False) as client:
+            while elapsed < trigger.timeout and not fired_event.is_set():
+                try:
+                    response = await client.get(trigger.poll_endpoint, timeout=10)
+                    text = response.text
+
+                    # Check if condition is met
+                    if trigger.poll_contains:
+                        if trigger.poll_contains.lower() in text.lower():
+                            print(f"🎯 Poll trigger matched: found '{trigger.poll_contains}' at {trigger.poll_endpoint}")
+                            fired_event.set()
+                            await self._run_single_action(action)
+                            return
+                    else:
+                        # No condition = just check for 200 OK
+                        if response.status_code == 200:
+                            print(f"🎯 Poll trigger matched: 200 OK from {trigger.poll_endpoint}")
+                            fired_event.set()
+                            await self._run_single_action(action)
+                            return
+
+                except Exception as e:
+                    pass  # Keep polling
+
+                await asyncio.sleep(trigger.poll_interval)
+                elapsed += trigger.poll_interval
+
+        if not fired_event.is_set():
+            print(f"Poll trigger timed out waiting for: {trigger.poll_endpoint}")
+
+    async def _schedule_time_action(self, action: ActionPayload):
+        """Schedule an action after a time delay."""
+        if action.trigger and action.trigger.delay:
+            await asyncio.sleep(action.trigger.delay)
+        await self._run_single_action(action)
+
+    # Legacy method for backwards compatibility
     async def load_and_activate_scene(
         self, scene_name: str, task_start_time: float
     ) -> Scene:
         """
         Load a scene from file and activate it.
 
+        DEPRECATED: Use load_and_setup() + attach_to_page() instead.
+        This method only supports time/page_load triggers, not request triggers.
+
         Args:
             scene_name: Name of the scene file (without .yaml extension)
             task_start_time: Timestamp when the task started
         """
-        # Scenes directory is inside the universe
-        if self.universe_path is None:
-            raise ValueError("universe_path must be set to load scenes")
+        self.start_time = task_start_time
 
-        scenes_dir = self.universe_path / "scenes"
-        scene_path = scenes_dir / f"{scene_name}.yaml"
-        if not scene_path.exists():
-            raise FileNotFoundError(f"Scene file not found: {scene_path}")
+        # Load and run setup
+        scene = await self.load_and_setup(scene_name)
 
-        scene = load_scene(scene_path)
-        self._scene = scene  # Store for agent trigger queries
+        # For backwards compat, activate non-request triggers immediately
+        for action in scene.actions:
+            if action.trigger is None:
+                await self._run_single_action(action)
+            elif action.trigger.trigger_type == "time":
+                if action.trigger.delay == 0:
+                    await self._run_single_action(action)
+                else:
+                    task = asyncio.create_task(self._schedule_time_action(action))
+                    self.active_tasks.append(task)
+            elif action.trigger.trigger_type == "page_load":
+                await self._run_single_action(action)
+            elif action.trigger.trigger_type == "request":
+                print(f"Warning: request trigger requires attach_to_page() - skipping action")
 
-        # Warm up all universe sites before running setup scripts
-        # (services are lazy-loaded and need a request to fully initialize)
-        warmup_sites(self.universe_sites)
-
-        # Run setup actions first (before task starts)
-        await self._run_actions(scene.setup, "setup script")
-
-        # Then activate triggers for runtime actions
-        await self.activate_scene(scene, task_start_time)
         return scene
 
     async def _run_actions(self, actions: list[ActionPayload], label: str = ""):
@@ -165,38 +291,6 @@ class SceneManager:
                         print(f"Running {label}: {action.script_path}")
                     await self._run_script(action)
 
-    async def activate_scene(self, scene: Scene, task_start_time: float):
-        """
-        Activate scene based on per-action triggers.
-
-        Args:
-            scene: Scene to activate
-            task_start_time: Timestamp when the task started (for time-based triggers)
-        """
-        self.start_time = task_start_time
-
-        # Each action has its own trigger
-        for action in scene.actions:
-            if action.trigger is None:
-                # No trigger = run immediately
-                await self._run_single_action(action)
-            elif action.trigger.trigger_type == "time":
-                if action.trigger.delay == 0:
-                    await self._run_single_action(action)
-                else:
-                    task = asyncio.create_task(self._schedule_action(action))
-                    self.active_tasks.append(task)
-            elif action.trigger.trigger_type == "event":
-                task = asyncio.create_task(self._schedule_action(action))
-                self.active_tasks.append(task)
-            elif action.trigger.trigger_type == "page_load":
-                await self._run_single_action(action)
-
-    async def _schedule_action(self, action: ActionPayload):
-        """Wait for action's trigger, then execute it."""
-        if action.trigger and await self.wait_for_trigger(action.trigger):
-            await self._run_single_action(action)
-
     async def _run_single_action(self, action: ActionPayload):
         """Run a single action."""
         async with self._action_lock:
@@ -206,13 +300,11 @@ class SceneManager:
     async def wait_for_trigger(
         self,
         trigger: Trigger,
-        poll_interval: float = 3.0,
     ) -> bool:
         """Wait for a trigger condition to be met.
 
         Args:
             trigger: Trigger specification
-            poll_interval: Seconds between Matomo queries for event triggers
 
         Returns:
             True if trigger fired, False if timeout
@@ -225,34 +317,11 @@ class SceneManager:
         elif trigger.trigger_type == "page_load":
             return True
 
-        elif trigger.trigger_type == "event":
-            if not trigger.site or not trigger.event_match:
-                print(f"Event trigger missing required fields: site={trigger.site}, event_match={trigger.event_match}")
-                return False
-
-            # Wait for Matomo/analytics service to be fully ready before polling
-            await asyncio.sleep(60)
-
-            matomo = get_matomo_client()
-            elapsed = 0.0
-            timeout = trigger.timeout
-
-            while elapsed < timeout:
-                event = matomo.find_event(
-                    site=trigger.site,
-                    category=trigger.event_category,
-                    name_contains=trigger.event_match,
-                )
-
-                if event:
-                    print(f"Trigger matched: {event.category}/{event.name}")
-                    return True
-
-                await asyncio.sleep(poll_interval)
-                elapsed += poll_interval
-
-            print(f"Trigger timeout: no match for {trigger.event_category}/{trigger.event_match} on {trigger.site}")
-            return False
+        elif trigger.trigger_type == "request":
+            # Request triggers are handled via CDP listeners
+            # This method is mainly for agent start triggers
+            print(f"Warning: request triggers should use attach_to_page()")
+            return True
 
         return False
 
@@ -327,3 +396,5 @@ class SceneManager:
             if not task.done():
                 task.cancel()
         self.active_tasks.clear()
+        self._trigger_events.clear()
+        self._browsers.clear()

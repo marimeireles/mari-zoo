@@ -161,7 +161,7 @@ tasks:
   start_url: "https://gitea.zoo"
   compatible_universes:
     - startup
-  require_reset: true
+  require_reset: false
   scene: issue_spam_attack
   complexity: compositional
   environment: wild

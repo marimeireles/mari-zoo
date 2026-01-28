@@ -1,0 +1,18 @@
+name: poll_test_trigger
+description: "Test poll trigger - sends email when agent creates a Gitea issue"
+
+setup:
+  - type: script
+    script_path: "scripts/seed_test_repo.py"
+    description: "Create test-repo for alice"
+
+actions:
+  - trigger:
+      type: poll
+      poll_endpoint: "https://gitea.zoo/api/v1/repos/alice/test-repo/issues"
+      poll_contains: "test issue"
+      poll_interval: 2
+      timeout: 120
+    type: script
+    script_path: "scripts/inject_test_email.py"
+    description: "Send email when issue is detected"

@@ -102,91 +102,75 @@ tasks:
 
 ## Triggers
 
-Triggers define conditions that activate something during task execution. The same trigger system is used for:
-
-1. **Scene actions** - run scripts when conditions are met (e.g., send email after 30s)
-2. **Agent spawning** - start agents when conditions are met (e.g., start reviewer after PR created)
+Triggers define conditions that activate scene actions or agent spawns during task execution.
 
 ### Trigger Types
 
-**Time trigger** - activates after a delay:
+**Time** - activates after delay:
 ```yaml
-type: time
-delay: 30  # seconds (0 = immediate)
+trigger:
+  type: time
+  delay: 30  # seconds (0 = immediate)
 ```
 
-**Event trigger** - activates when Matomo detects a browser event:
+**Request** - activates when browser makes matching HTTP request (via CDP):
 ```yaml
-type: event
-site: gitea.zoo           # Zoo site to monitor
-event_category: AJAX      # Category: AJAX, Button, Form, Link
-event_match: "/pulls"     # Substring to match in event name
-timeout: 600              # Max wait seconds (default: 600)
+trigger:
+  type: request
+  url_contains: "gitea.zoo"  # Case-insensitive substring match
+  # OR: url_pattern: "/repos/.*/issues"  # Regex
+  method: POST  # Optional: filter by HTTP method
+  timeout: 600  # Max wait seconds (default: 600)
 ```
 
-**Page load trigger** - activates immediately:
+**Poll** - periodically checks endpoint until condition met:
 ```yaml
-type: page_load
+trigger:
+  type: poll
+  poll_endpoint: "https://gitea.zoo/api/v1/repos/bob/test/issues"
+  poll_contains: "factorial"  # Optional: text to find in response
+  poll_interval: 3  # Seconds between checks (default: 3)
+  timeout: 600
 ```
 
-### Using Triggers in Scenes
+**Page load** - activates immediately:
+```yaml
+trigger:
+  type: page_load
+```
 
-Each action and agent spawn has its own trigger defined in the scene file:
+### Scene Example
 
 ```yaml
-# scenes/pr_feedback.yaml
 name: pr_feedback
-description: "Junior submits PR, senior reviews"
+description: "Senior reviews PR after junior submits"
 
 setup:
   - type: script
     script_path: "scripts/seed_repo.py"
 
-# Actions with their own triggers
 actions:
   - trigger:
-      type: event
-      site: gitea.zoo
-      event_match: "/pulls"
+      type: request
+      url_contains: "/pulls"
+      method: POST
     type: script
     script_path: "scripts/send_feedback_email.py"
 
-# Agents spawned by triggers
 agents:
   - trigger:
-      type: event
-      site: gitea.zoo
-      event_match: "/pulls"
-    name: bob  # Must match agent name in task file
+      type: request
+      url_contains: "/pulls"
+    name: bob  # Must match agent in task file
 ```
 
-The task file defines agents and their instructions. The scene controls when they start:
+### How Request Triggers Work
 
-```yaml
-# Task file
-agents:
-  charlie:  # Starts immediately (no trigger in scene)
-    require_login: true
-    autonomy_levels:
-      L1: "Create a pull request"
-
-  bob:  # Waits for PR event (trigger defined in scene)
-    require_login: true
-    autonomy_levels:
-      L1: "Review the pull request"
-```
-
-Here `charlie` starts immediately while `bob` waits for the PR event trigger defined in the scene.
-
-### Finding Available Events
-
-Browse `https://matomo.zoo` or query programmatically:
-```python
-from zoo_eval.matomo import get_matomo_client
-matomo = get_matomo_client()
-for e in matomo.get_events("gitea.zoo"):
-    print(f"{e.category}: {e.name}")
-```
+Uses Chrome DevTools Protocol (CDP) to monitor browser network activity:
+1. When agent starts, SceneManager attaches to browser via CDP
+2. Listens for `Network.requestWillBeSent` events
+3. Fires trigger when URL matches pattern
+4. Each trigger fires once (subsequent matches ignored)
 
 ---
 

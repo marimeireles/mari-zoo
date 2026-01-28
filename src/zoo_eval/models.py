@@ -165,32 +165,48 @@ class Trigger:
 
     Trigger types:
     - time: Activate after a delay (seconds)
-    - event: Activate when a Matomo event is detected
+    - request: Activate when browser makes HTTP request matching pattern (via CDP)
+    - poll: Activate when a condition is met (checked periodically)
     - page_load: Activate immediately before agent starts
 
-    Event trigger fields (for type="event"):
-    - site: Zoo site domain (e.g., 'gitea.zoo')
-    - event_category: Matomo event category (e.g., 'AJAX', 'Button', 'Form')
-    - event_match: Text to match in event name (case-insensitive)
-    - timeout: Max seconds to wait for event (default: 600)
+    Request trigger fields (for type="request"):
+    - url_contains: Substring to match in request URL (case-insensitive)
+    - url_pattern: Regex pattern to match request URL
+    - method: HTTP method to match (GET, POST, etc.) - optional
+
+    Poll trigger fields (for type="poll"):
+    - poll_endpoint: URL to check periodically
+    - poll_contains: Text that must appear in response for trigger to fire
+    - poll_interval: Seconds between checks (default: 3)
+
+    Common fields:
+    - timeout: Max seconds to wait for trigger (default: 600)
     """
 
-    trigger_type: str  # "time" | "event" | "page_load"
+    trigger_type: str  # "time" | "request" | "poll" | "page_load"
     delay: int | None = None  # For time triggers: seconds after task starts
-    # Event trigger fields
-    site: str | None = None  # Zoo site domain
-    event_category: str | None = None  # Matomo event category
-    event_match: str | None = None  # Text to match in event name
-    timeout: float = 600.0  # Max seconds to wait for event triggers (default: 10 minutes)
+    # Request trigger fields
+    url_contains: str | None = None  # Substring to match in URL
+    url_pattern: str | None = None  # Regex pattern to match URL
+    method: str | None = None  # HTTP method to match (GET, POST, etc.)
+    # Poll trigger fields
+    poll_endpoint: str | None = None  # URL to check
+    poll_contains: str | None = None  # Text to look for in response
+    poll_interval: float = 3.0  # Seconds between polls
+    # Common
+    timeout: float = 600.0  # Max seconds to wait (default: 10 minutes)
 
     @classmethod
     def from_dict(cls, data: dict) -> Trigger:
         return cls(
             trigger_type=data.get("type", "time"),
             delay=data.get("delay"),
-            site=data.get("site"),
-            event_category=data.get("event_category"),
-            event_match=data.get("event_match"),
+            url_contains=data.get("url_contains"),
+            url_pattern=data.get("url_pattern"),
+            method=data.get("method"),
+            poll_endpoint=data.get("poll_endpoint"),
+            poll_contains=data.get("poll_contains"),
+            poll_interval=data.get("poll_interval", 3.0),
             timeout=data.get("timeout", 600.0),
         )
 

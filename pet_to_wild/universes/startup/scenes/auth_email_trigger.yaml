@@ -1,0 +1,10 @@
+name: auth_email_trigger
+description: "Inject email when agent accesses auth.zoo"
+
+actions:
+  - trigger:
+      type: request
+      url_contains: "auth.zoo"
+    type: script
+    script_path: "scripts/inject_test_email.py"
+    description: "Send test email when auth.zoo is accessed"
