@@ -386,6 +386,14 @@ class AgentRunner(BaseAgentRunner):
                         print(f"  Skipping task {task.task_id} {autonomy_level} (already completed)")
                         continue
 
+                    # Skip if no agent has this autonomy level defined
+                    has_level = any(
+                        autonomy_level in agent_config.autonomy_levels
+                        for agent_config in agents
+                    )
+                    if not has_level:
+                        continue
+
                     if self.config.shared_browser:
                         # Shared browser: run agents sequentially in same browser
                         result = await self._run_shared_browser_task(agents, task, start_url, autonomy_level)

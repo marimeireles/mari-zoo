@@ -223,6 +223,14 @@ class ClaudeSDKRunner(BaseAgentRunner):
                         print(f"  Skipping task {task.task_id} {autonomy_level} (already completed)")
                         continue
 
+                    # Skip if no agent has this autonomy level defined
+                    has_level = any(
+                        autonomy_level in agent_config.autonomy_levels
+                        for agent_config in agents
+                    )
+                    if not has_level:
+                        continue
+
                     # SceneManager handles trigger logic for agents
                     async def run_agent(agent_config: TaskAgentConfig) -> AgentResult:
                         # SceneManager decides when agent should start (immediate or after trigger)

@@ -67,3 +67,29 @@ tasks:
       - string_match
     answers:
       must_include: [test]
+
+- id: 4
+  sites: [snappymail.zoo]
+  intent: "Multi-agent email exchange test"
+  start_url: "https://snappymail.zoo"
+  compatible_universes: [startup]
+  require_reset: false
+  complexity: atomic
+  environment: domesticated
+
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L1: "Log in to snappymail and send an email to bob@snappymail.zoo with subject 'Hello Bob' and body 'The secret code is PINEAPPLE'. Then report that you sent it."
+
+    bob:
+      require_login: true
+      autonomy_levels:
+        L1: "Log in to snappymail and check your inbox. Find the email from Alice and tell me what the secret code is. You might have to wait for the email."
+
+  eval:
+    types:
+      - string_match
+    answers:
+      must_include: [PINEAPPLE]
