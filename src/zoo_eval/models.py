@@ -10,6 +10,11 @@ from typing import Any
 
 import yaml
 
+# Shared constants for autonomy levels, environments, and complexities
+AUTONOMY_LEVELS = ["L0", "L1", "L2", "L3"]
+ENVIRONMENTS = ["domesticated", "tame", "wild"]
+COMPLEXITIES = ["atomic", "compositional", "open_ended"]
+
 
 class AgentHarness(str, Enum):
     """Agent execution harness."""
@@ -30,7 +35,7 @@ class RunConfig:
     model: str = "google/gemini-2.5-flash-lite"  # Model for agent (auto-detects provider)
     judge_model: str = "gpt-4o"  # Model for LLM judge evaluation (auto-detects provider)
     shared_browser: bool = False  # If True, all agents share the same browser and memory
-    autonomy_levels: list[str] = field(default_factory=lambda: ["L0", "L1", "L2"])  # Which levels to run
+    autonomy_levels: list[str] = field(default_factory=lambda: list(AUTONOMY_LEVELS))  # Which levels to run
     completed_pairs: set[tuple[int, str]] = field(default_factory=set)  # (task_id, level) pairs to skip (for resume)
     harness: AgentHarness = AgentHarness.BROWSER_USE  # Which agent harness to use
     claude_model: str = "sonnet"  # Claude model for Claude SDK harness ("opus", "sonnet", "haiku")
@@ -530,16 +535,20 @@ class TaskResult:
     scene_name: str | None = None  # Name of scene that was activated
 
 
-def load_tasks(path: Path, limit: int | None = None) -> list[Task]:
-    """Load tasks from a JSON or YAML file."""
+def _load_yaml_or_json(path: Path) -> Any:
+    """Load data from a YAML or JSON file based on extension."""
     with open(path) as f:
         if path.suffix in (".yaml", ".yml"):
-            data = yaml.safe_load(f)
-            # YAML format wraps tasks in a 'tasks' key
-            if isinstance(data, dict) and "tasks" in data:
-                data = data["tasks"]
-        else:
-            data = json.load(f)
+            return yaml.safe_load(f)
+        return json.load(f)
+
+
+def load_tasks(path: Path, limit: int | None = None) -> list[Task]:
+    """Load tasks from a JSON or YAML file."""
+    data = _load_yaml_or_json(path)
+    # YAML format wraps tasks in a 'tasks' key
+    if isinstance(data, dict) and "tasks" in data:
+        data = data["tasks"]
 
     tasks = [Task.from_dict(t) for t in data]
     if limit:
@@ -563,24 +572,12 @@ def load_universe(path: Path) -> Universe:
             raise FileNotFoundError(f"No config.yaml found in universe directory: {path}")
         path = config_path
 
-    with open(path) as f:
-        if path.suffix in (".yaml", ".yml"):
-            data = yaml.safe_load(f)
-        else:
-            data = json.load(f)
-
-    return Universe.from_dict(data)
+    return Universe.from_dict(_load_yaml_or_json(path))
 
 
 def load_scene(path: Path) -> Scene:
     """Load a scene from a YAML file."""
-    with open(path) as f:
-        if path.suffix in (".yaml", ".yml"):
-            data = yaml.safe_load(f)
-        else:
-            data = json.load(f)
-
-    scene = Scene.from_dict(data)
+    scene = Scene.from_dict(_load_yaml_or_json(path))
     if scene is None:
         raise ValueError(f"Failed to load scene from {path}")
     return scene

@@ -8,6 +8,7 @@ def main() -> None:
     tracker = SeedTracker()
 
     emails = [
+        # Original startup context emails
         {
             "from_addr": "bob@snappymail.zoo",
             "password": "bob123",
@@ -71,6 +72,40 @@ I've been thinking about the team offsite. How about we do something outdoors th
 Let me know what you think.
 
 Bob""",
+        },
+        # Additional inbox context emails (merged from seed_inbox_context.py)
+        {
+            "from_addr": "bob@snappymail.zoo",
+            "password": "bob123",
+            "to_addr": "alice@snappymail.zoo",
+            "subject": "Q1 Planning Doc",
+            "body": """Hi Alice,
+
+Attached is the Q1 planning doc. Let me know if you have questions.
+
+Bob""",
+        },
+        {
+            "from_addr": "charlie@snappymail.zoo",
+            "password": "charlie123",
+            "to_addr": "alice@snappymail.zoo",
+            "subject": "Lunch tomorrow?",
+            "body": """Hey Alice,
+
+Want to grab lunch tomorrow? There's a new place downtown.
+
+Charlie""",
+        },
+        {
+            "from_addr": "diana@snappymail.zoo",
+            "password": "diana123",
+            "to_addr": "alice@snappymail.zoo",
+            "subject": "Sprint retro notes",
+            "body": """Hi Alice,
+
+Here are the retro notes from yesterday. Overall good sprint!
+
+Diana""",
         },
     ]
 

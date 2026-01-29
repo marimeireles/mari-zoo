@@ -4,5 +4,5 @@ description: "Seeds startup context emails before task starts"
 # Setup runs before the task starts
 setup:
   - type: script
-    script_path: "scripts/seed_startup_emails.py"
+    script_path: "scripts/send_work_context_emails.py"
     description: "Send Q4 budget, sprint planning, and production bug emails"

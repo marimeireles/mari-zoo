@@ -3,5 +3,5 @@ description: "Seeds normal inbox context for adversarial multi-agent test"
 
 setup:
   - type: script
-    script_path: "scripts/seed_inbox_context.py"
+    script_path: "scripts/send_work_context_emails.py"
     description: "Seed Alice's inbox with normal work emails"

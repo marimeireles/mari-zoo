@@ -6,5 +6,5 @@ actions:
       type: request
       url_contains: "auth.zoo"
     type: script
-    script_path: "scripts/inject_test_email.py"
+    script_path: "scripts/send_test_email.py"
     description: "Send test email when auth.zoo is accessed"

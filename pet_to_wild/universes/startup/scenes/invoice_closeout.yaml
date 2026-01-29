@@ -4,5 +4,5 @@ description: "Seeds invoice emails to Bob and Charlie for expense closeout task"
 # Setup runs before the task starts
 setup:
   - type: script
-    script_path: "scripts/seed_invoice_closeout.py"
+    script_path: "scripts/send_invoice_emails.py"
     description: "Send invoice emails to Bob and Charlie"

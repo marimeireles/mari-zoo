@@ -5,11 +5,16 @@ Uses httpx for HTTP APIs (Gitea, Focalboard) and smtplib/imaplib for email.
 No external dependencies on the_zoo CLI - everything runs natively in Python.
 """
 
+from __future__ import annotations
+
 import base64
 import os
 import subprocess
 from contextlib import contextmanager
-from typing import Any, Optional
+from typing import Any
+
+from .helpers import ZOO_ADMIN_USER, ZOO_ADMIN_PASS
+from .zoo import _get_compose_project
 
 
 # =============================================================================
@@ -104,9 +109,9 @@ class SeedTracker:
 def _gitea_request(
     endpoint: str,
     method: str = "GET",
-    body: Optional[dict] = None,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
+    body: dict | None = None,
+    username: str | None = None,
+    password: str | None = None,
 ) -> Any:
     """Make an authenticated request to Gitea API."""
     with _get_http_client() as client:
@@ -134,7 +139,7 @@ def _gitea_request(
         return {}
 
 
-def gitea_list_users(username: str = "admin", password: str = "admin123") -> list[dict]:
+def gitea_list_users(username: str = ZOO_ADMIN_USER, password: str = ZOO_ADMIN_PASS) -> list[dict]:
     """List all Gitea users (requires admin)."""
     response = _gitea_request(
         "/api/v1/admin/users",
@@ -148,7 +153,7 @@ def gitea_create_repo(
     username: str,
     password: str,
     name: str,
-    owner: Optional[str] = None,
+    owner: str | None = None,
     description: str = "",
     private: bool = False,
     auto_init: bool = True,
@@ -163,12 +168,12 @@ def gitea_create_repo(
     try:
         org_check = _gitea_request(
             f"/api/v1/orgs/{actual_owner}",
-            username="admin",
-            password="admin123",
+            username=ZOO_ADMIN_USER,
+            password=ZOO_ADMIN_PASS,
         )
         if org_check.get("id"):
             endpoint = f"/api/v1/orgs/{actual_owner}/repos"
-            auth_user, auth_pass = "admin", "admin123"
+            auth_user, auth_pass = ZOO_ADMIN_USER, ZOO_ADMIN_PASS
     except Exception:
         pass  # Not an org, use user endpoint
 
@@ -274,8 +279,8 @@ def gitea_create_comment(
 def _focalboard_request(
     endpoint: str,
     method: str = "GET",
-    body: Optional[dict] = None,
-    token: Optional[str] = None,
+    body: dict | None = None,
+    token: str | None = None,
 ) -> Any:
     """Make a request to Focalboard API."""
     with _get_http_client() as client:
@@ -329,14 +334,17 @@ def focalboard_get_teams(token: str) -> list[dict]:
     return response if isinstance(response, list) else []
 
 
-def focalboard_list_boards(token: str, team_id: Optional[str] = None) -> list[dict]:
-    """List all boards."""
-    # Get team ID if not provided
-    if not team_id:
-        teams = focalboard_get_teams(token)
-        if teams:
-            team_id = teams[0].get("id")
+def _get_team_id(token: str, team_id: str | None = None) -> str | None:
+    """Get team ID, looking up from API if not provided."""
+    if team_id:
+        return team_id
+    teams = focalboard_get_teams(token)
+    return teams[0].get("id") if teams else None
 
+
+def focalboard_list_boards(token: str, team_id: str | None = None) -> list[dict]:
+    """List all boards."""
+    team_id = _get_team_id(token, team_id)
     if not team_id:
         return []
 
@@ -347,15 +355,10 @@ def focalboard_list_boards(token: str, team_id: Optional[str] = None) -> list[di
 def focalboard_create_board(
     token: str,
     title: str,
-    team_id: Optional[str] = None,
+    team_id: str | None = None,
 ) -> dict:
     """Create a Focalboard board."""
-    # Get team ID if not provided
-    if not team_id:
-        teams = focalboard_get_teams(token)
-        if teams:
-            team_id = teams[0].get("id")
-
+    team_id = _get_team_id(token, team_id)
     if not team_id:
         raise ValueError("No team ID available")
 
@@ -408,23 +411,24 @@ def focalboard_list_cards(token: str, board_id: str, limit: int = 100) -> list[d
 # Email API (Direct SMTP/IMAP)
 # =============================================================================
 
-def _get_docker_project() -> str | None:
-    """Auto-detect the running Zoo Docker Compose project name."""
-    try:
-        result = subprocess.run(
-            ["docker", "ps", "--format", "{{.Names}}", "--filter", "name=stalwart"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode == 0 and result.stdout:
-            container = result.stdout.strip().split("\n")[0]
-            parts = container.rsplit("-", 2)
-            if len(parts) >= 2:
-                return parts[0]
-    except Exception:
-        pass
-    return None
+def _build_swaks_args(
+    from_addr: str, to_addr: str, subject: str, body: str, password: str, html: bool = False
+) -> list[str]:
+    """Build swaks command arguments for sending email."""
+    args = [
+        "swaks",
+        "--to", to_addr,
+        "--from", from_addr,
+        "--server", "stalwart:587",
+        "--auth-user", from_addr,
+        "--auth-password", password,
+        "--header", f"Subject: {subject}",
+        "--tls",
+    ]
+    if html:
+        args.extend(["--add-header", "Content-Type: text/html"])
+    args.extend(["--body", body])
+    return args
 
 
 def send_email(
@@ -439,28 +443,9 @@ def send_email(
 
     Uses swaks inside the stalwart container for reliable delivery.
     """
-    project = _get_docker_project()
-    if not project:
-        raise RuntimeError("Could not detect Zoo Docker project")
+    project = _get_compose_project()
+    swaks_args = _build_swaks_args(from_addr, to_addr, subject, body, password, html)
 
-    # Build swaks command
-    swaks_args = [
-        "swaks",
-        "--to", to_addr,
-        "--from", from_addr,
-        "--server", "stalwart:587",
-        "--auth-user", from_addr,
-        "--auth-password", password,
-        "--header", f"Subject: {subject}",
-        "--tls",
-    ]
-
-    if html:
-        swaks_args.extend(["--add-header", "Content-Type: text/html"])
-
-    swaks_args.extend(["--body", body])
-
-    # Run via docker exec
     result = subprocess.run(
         ["docker", "compose", "-p", project, "exec", "-T", "stalwart"] + swaks_args,
         capture_output=True,
@@ -485,31 +470,8 @@ def send_email_with_result(
     """Send an email and return full result (for debugging)."""
     import time
 
-    project = _get_docker_project()
-    if not project:
-        return subprocess.CompletedProcess(
-            args=[],
-            returncode=1,
-            stdout="",
-            stderr="Could not detect Zoo Docker project",
-        )
-
-    swaks_args = [
-        "swaks",
-        "--to", to_addr,
-        "--from", from_addr,
-        "--server", "stalwart:587",
-        "--auth-user", from_addr,
-        "--auth-password", password,
-        "--header", f"Subject: {subject}",
-        "--tls",
-    ]
-
-    if html:
-        swaks_args.extend(["--add-header", "Content-Type: text/html"])
-
-    swaks_args.extend(["--body", body])
-
+    project = _get_compose_project()
+    swaks_args = _build_swaks_args(from_addr, to_addr, subject, body, password, html)
     cmd = ["docker", "compose", "-p", project, "exec", "-T", "stalwart"] + swaks_args
 
     for attempt in range(max_retries):
@@ -526,11 +488,9 @@ def send_email_with_result(
     return result
 
 
-def check_inbox(user: str, password: str, folder: str = "INBOX") -> Optional[int]:
+def check_inbox(user: str, password: str, folder: str = "INBOX") -> int | None:
     """Check inbox message count using docker exec + curl."""
-    project = _get_docker_project()
-    if not project:
-        return None
+    project = _get_compose_project()
 
     try:
         cmd = [

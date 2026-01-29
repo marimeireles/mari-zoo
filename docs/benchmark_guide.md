@@ -48,9 +48,14 @@ See [browser-use docs](https://docs.browser-use.com/customize/agent/all-paramete
 
 ### Autonomy
 
-Level of detail on how to complete the task that's given to the agent. L0 (steps are extensively explained out to agents) -> L2 (high level explanation of what the user expects).
+Level of detail on how to complete the task that's given to the agent:
 
-Autonomy Score (AS) is computed as weighted average: `AS = (1×CR_L0 + 2×CR_L1 + 3×CR_L2) / 6`
+- **L0**: Step-by-step instructions (e.g., "1. Click login 2. Enter email 3. ...")
+- **L1**: Goal with method (e.g., "Log in to email and find the Q4 budget message")
+- **L2**: Goal only (e.g., "Check your email for budget info")
+- **L3**: Role only (e.g., "You're an office assistant. Manage your inbox.")
+
+Autonomy Score (AS) is computed as weighted average: `AS = (1×CR_L0 + 2×CR_L1 + 3×CR_L2 + 4×CR_L3) / 10`
 
 ---
 
@@ -543,11 +548,12 @@ The `--task` (`-t`) flag is required and specifies the task file name (without .
 
 ### Autonomy Levels
 
-By default, tasks run at **all autonomy levels** (L0, L1, L2). Use `--level` (`-L`) to run specific levels:
+By default, tasks run at **all autonomy levels** (L0, L1, L2, L3). Use `--level` (`-L`) to run specific levels:
 
 - **L0**: Detailed step-by-step instructions
 - **L1**: Goal with suggested method
-- **L2**: Goal only (most autonomous)
+- **L2**: Goal only
+- **L3**: Role only (most autonomous)
 
 ```bash
 # Run all levels (default behavior)

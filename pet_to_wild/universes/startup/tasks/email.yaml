@@ -33,7 +33,7 @@ tasks:
   compatible_universes:
     - startup
   require_reset: false
-  scene: seed_startup_emails
+  scene: work_context_emails
   complexity: atomic
   environment: domesticated
 
@@ -134,7 +134,7 @@ tasks:
   compatible_universes:
     - startup
   require_reset: false
-  scene: seed_startup_emails
+  scene: work_context_emails
   complexity: compositional
   environment: domesticated
 
@@ -177,7 +177,7 @@ tasks:
   compatible_universes:
     - startup
   require_reset: false
-  scene: seed_invoice_closeout
+  scene: invoice_closeout
   complexity: compositional
   environment: domesticated
 

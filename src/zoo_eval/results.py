@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .models import TaskResult
-from .evaluators import EvalResult
+from .models import AUTONOMY_LEVELS, COMPLEXITIES, ENVIRONMENTS
 from .runner import RunResult
 
 
@@ -121,20 +118,17 @@ class ResultsDB:
     def get_latest_run(self, config_path: str | None = None) -> int | None:
         """Get the latest run ID, optionally filtered by config path."""
         if config_path:
-            row = self.conn.execute(
-                "SELECT id FROM runs WHERE config_path = ? ORDER BY id DESC LIMIT 1",
-                (config_path,),
-            ).fetchone()
+            query = "SELECT id FROM runs WHERE config_path = ? ORDER BY id DESC LIMIT 1"
+            row = self.conn.execute(query, (config_path,)).fetchone()
         else:
-            row = self.conn.execute(
-                "SELECT id FROM runs ORDER BY id DESC LIMIT 1"
-            ).fetchone()
+            query = "SELECT id FROM runs ORDER BY id DESC LIMIT 1"
+            row = self.conn.execute(query).fetchone()
         return row["id"] if row else None
 
     def get_completed_task_ids(self, run_id: int) -> set[int]:
         """Get set of task IDs that have already been completed in a run.
 
-        A task is considered complete only if all autonomy levels (L0, L1, L2)
+        A task is considered complete only if all autonomy levels (L0, L1, L2, L3)
         have been run, or if at least one result exists for old-format runs.
         """
         rows = self.conn.execute(
@@ -229,6 +223,37 @@ class ResultsDB:
 
         self.conn.commit()
 
+    def _get_stats_by_column(
+        self, run_id: int, column: str, values: list[str], include_empty: bool = False
+    ) -> dict[str, dict[str, Any]]:
+        """Get stats grouped by a column value.
+
+        Args:
+            run_id: The run ID to query
+            column: Column name to group by (e.g., 'autonomy_level', 'environment')
+            values: List of values to query for
+            include_empty: If True, include entries with zero total; otherwise skip them
+        """
+        stats = {}
+        for value in values:
+            row = self.conn.execute(
+                f"""SELECT
+                    COUNT(*) as total,
+                    AVG(score) as avg_score,
+                    SUM(CASE WHEN score >= 1.0 THEN 1 ELSE 0 END) as completed
+                   FROM task_results WHERE run_id = ? AND {column} = ?""",
+                (run_id, value),
+            ).fetchone()
+            total = row["total"] or 0
+            if include_empty or total > 0:
+                stats[value] = {
+                    "total": total,
+                    "avg_score": row["avg_score"] or 0,
+                    "completed": row["completed"] or 0,
+                    "completion_rate": (row["completed"] or 0) / total * 100 if total else 0,
+                }
+        return stats
+
     def get_run_stats(self, run_id: int) -> dict[str, Any]:
         """Get statistics for a run."""
         row = self.conn.execute(
@@ -246,65 +271,6 @@ class ResultsDB:
             (run_id,),
         ).fetchone()
 
-        # Get per-autonomy-level stats
-        level_stats = {}
-        for level in ["L0", "L1", "L2"]:
-            level_row = self.conn.execute(
-                """SELECT
-                    COUNT(*) as total,
-                    AVG(score) as avg_score,
-                    SUM(CASE WHEN score >= 1.0 THEN 1 ELSE 0 END) as completed
-                   FROM task_results WHERE run_id = ? AND autonomy_level = ?""",
-                (run_id, level),
-            ).fetchone()
-            level_total = level_row["total"] or 0
-            level_stats[level] = {
-                "total": level_total,
-                "avg_score": level_row["avg_score"] or 0,
-                "completed": level_row["completed"] or 0,
-                "completion_rate": (level_row["completed"] or 0) / level_total * 100 if level_total else 0,
-            }
-
-        # Get per-environment stats
-        env_stats = {}
-        for env in ["domesticated", "tame", "wild"]:
-            env_row = self.conn.execute(
-                """SELECT
-                    COUNT(*) as total,
-                    AVG(score) as avg_score,
-                    SUM(CASE WHEN score >= 1.0 THEN 1 ELSE 0 END) as completed
-                   FROM task_results WHERE run_id = ? AND environment = ?""",
-                (run_id, env),
-            ).fetchone()
-            env_total = env_row["total"] or 0
-            if env_total > 0:
-                env_stats[env] = {
-                    "total": env_total,
-                    "avg_score": env_row["avg_score"] or 0,
-                    "completed": env_row["completed"] or 0,
-                    "completion_rate": (env_row["completed"] or 0) / env_total * 100 if env_total else 0,
-                }
-
-        # Get per-complexity stats
-        complexity_stats = {}
-        for complexity in ["atomic", "compositional", "open_ended"]:
-            comp_row = self.conn.execute(
-                """SELECT
-                    COUNT(*) as total,
-                    AVG(score) as avg_score,
-                    SUM(CASE WHEN score >= 1.0 THEN 1 ELSE 0 END) as completed
-                   FROM task_results WHERE run_id = ? AND complexity = ?""",
-                (run_id, complexity),
-            ).fetchone()
-            comp_total = comp_row["total"] or 0
-            if comp_total > 0:
-                complexity_stats[complexity] = {
-                    "total": comp_total,
-                    "avg_score": comp_row["avg_score"] or 0,
-                    "completed": comp_row["completed"] or 0,
-                    "completion_rate": (comp_row["completed"] or 0) / comp_total * 100 if comp_total else 0,
-                }
-
         total = row["total"] or 0
         return {
             "total": total,
@@ -317,9 +283,15 @@ class ResultsDB:
             "avg_duration": row["avg_duration"] or 0,
             "total_duration": row["total_duration"] or 0,
             "avg_steps": row["avg_steps"] or 0,
-            "by_level": level_stats,
-            "by_environment": env_stats,
-            "by_complexity": complexity_stats,
+            "by_level": self._get_stats_by_column(
+                run_id, "autonomy_level", AUTONOMY_LEVELS, include_empty=True
+            ),
+            "by_environment": self._get_stats_by_column(
+                run_id, "environment", ENVIRONMENTS
+            ),
+            "by_complexity": self._get_stats_by_column(
+                run_id, "complexity", COMPLEXITIES
+            ),
         }
 
     def get_run_results(self, run_id: int) -> list[dict]:
@@ -360,18 +332,19 @@ class ResultsDB:
                FROM task_results WHERE run_id = ? AND score < ? ORDER BY score, task_id, autonomy_level""",
             (run_id, threshold),
         ).fetchall()
-
         return [dict(row) for row in rows]
+
+    def get_task_result_id(self, run_id: int, task_id: int, autonomy_level: str) -> int | None:
+        """Get the task_result row ID for a specific run/task/level combination."""
+        row = self.conn.execute(
+            "SELECT id FROM task_results WHERE run_id = ? AND task_id = ? AND autonomy_level = ?",
+            (run_id, task_id, autonomy_level),
+        ).fetchone()
+        return row["id"] if row else None
 
     def close(self):
         """Close the database connection."""
         self.conn.close()
-
-
-def _score_to_bar(score: float, width: int = 10) -> str:
-    """Convert a 0-1 score to a progress bar."""
-    filled = int(score * width)
-    return "▓" * filled + "░" * (width - filled)
 
 
 def _score_color(score: float) -> str:
@@ -380,8 +353,40 @@ def _score_color(score: float) -> str:
         return "green"
     elif score >= 0.5:
         return "yellow"
-    else:
-        return "red"
+    return "red"
+
+
+def _get_first_available_level(levels: dict[str, dict]) -> tuple[str, dict] | None:
+    """Get the first available autonomy level and its data."""
+    for level in AUTONOMY_LEVELS:
+        if level in levels:
+            return level, levels[level]
+    return None
+
+
+def _truncate(text: str, max_len: int) -> str:
+    """Truncate text to max length."""
+    return text[:max_len] if len(text) > max_len else text
+
+
+def _group_results_by_env(results: list[dict]) -> dict[str, dict[int, dict[str, dict]]]:
+    """Group results by environment, then by task_id, then by autonomy level."""
+    grouped: dict[str, dict[int, dict[str, dict]]] = {}
+    for row in results:
+        env = row.get("environment") or "unknown"
+        task_id = row["task_id"]
+        level = row.get("autonomy_level", "L1")
+
+        grouped.setdefault(env, {}).setdefault(task_id, {})[level] = row
+    return grouped
+
+
+def _print_subtask_status(console, subtask: dict, indent: str, show_evidence: bool = False):
+    """Print a single subtask's status."""
+    status = "[green]✓[/green]" if subtask["passed"] else "[red]✗[/red]"
+    console.print(f"{indent}{status} {subtask['subtask_id']}: {subtask['description']}")
+    if show_evidence and subtask.get("evidence"):
+        console.print(f"{indent}   [dim]{subtask['evidence']}[/dim]")
 
 
 def print_report(db: ResultsDB, run_id: int, detailed: bool = False):
@@ -395,7 +400,6 @@ def print_report(db: ResultsDB, run_id: int, detailed: bool = False):
     from rich.console import Console
     from rich.table import Table
 
-    # Use unlimited width when detailed to avoid truncation
     console = Console(width=None if detailed else None, force_terminal=True)
     stats = db.get_run_stats(run_id)
 
@@ -412,27 +416,14 @@ def print_report(db: ResultsDB, run_id: int, detailed: bool = False):
     summary_parts.append(f"Time: {stats['total_duration']:.0f}s")
     console.print("  " + " | ".join(summary_parts))
 
-    # Task results with subtask details
     all_results = db.get_run_results(run_id)
     if not all_results:
         return
 
-    # Group results by environment, then by task_id
-    results_by_env: dict[str, dict[int, dict[str, dict]]] = {}
-    for row in all_results:
-        env = row.get("environment") or "unknown"
-        task_id = row["task_id"]
-        level = row.get("autonomy_level", "L1")
-
-        if env not in results_by_env:
-            results_by_env[env] = {}
-        if task_id not in results_by_env[env]:
-            results_by_env[env][task_id] = {}
-        results_by_env[env][task_id][level] = row
+    results_by_env = _group_results_by_env(all_results)
 
     # Display a table per environment
-    env_order = ["domesticated", "tame", "wild", "unknown"]
-    for env in env_order:
+    for env in ENVIRONMENTS + ["unknown"]:
         if env not in results_by_env:
             continue
 
@@ -442,9 +433,8 @@ def print_report(db: ResultsDB, run_id: int, detailed: bool = False):
         console.print()
         results_table = Table(show_header=True, header_style="bold", title=f"{env_display} Environment")
         results_table.add_column("Task", style="bold")
-        results_table.add_column("L0", justify="center")
-        results_table.add_column("L1", justify="center")
-        results_table.add_column("L2", justify="center")
+        for level in AUTONOMY_LEVELS:
+            results_table.add_column(level, justify="center")
         results_table.add_column("Subtasks")
 
         for task_id in sorted(tasks_by_id.keys()):
@@ -453,92 +443,86 @@ def print_report(db: ResultsDB, run_id: int, detailed: bool = False):
 
             # Collect subtask info from first available level
             subtask_info = ""
-            for level in ["L0", "L1", "L2"]:
-                if level in levels:
-                    result = levels[level]
-                    subtasks_passed = result.get("subtasks_passed", 0)
-                    subtasks_total = result.get("subtasks_total", 0)
-                    if subtasks_total > 0:
-                        subtask_info = f"{subtasks_passed}/{subtasks_total}"
-                    break
+            first = _get_first_available_level(levels)
+            if first:
+                result = first[1]
+                subtasks_total = result.get("subtasks_total", 0)
+                if subtasks_total > 0:
+                    subtask_info = f"{result.get('subtasks_passed', 0)}/{subtasks_total}"
 
-            for level in ["L0", "L1", "L2"]:
+            for level in AUTONOMY_LEVELS:
                 if level not in levels:
                     row_data.append("-")
-                    continue
-
-                result = levels[level]
-                score = result.get("score", 0)
-                color = _score_color(score)
-                row_data.append(f"[{color}]{score:.2f}[/{color}]")
+                else:
+                    score = levels[level].get("score", 0)
+                    color = _score_color(score)
+                    row_data.append(f"[{color}]{score:.2f}[/{color}]")
 
             row_data.append(subtask_info)
             results_table.add_row(*row_data)
 
         console.print(results_table)
 
-        # Show subtask details for each task in this environment
+        # Show subtask details for each task
         for task_id in sorted(tasks_by_id.keys()):
             levels = tasks_by_id[task_id]
+            first = _get_first_available_level(levels)
+            if not first:
+                continue
 
-            # Get task name from first available level
-            task_name = ""
-            for level in ["L0", "L1", "L2"]:
-                if level in levels:
-                    task_name = levels[level].get('task_name', '')
-                    break
+            task_name = first[1].get('task_name', '')
 
-            # In detailed mode, show subtasks for EACH autonomy level
             if detailed:
-                console.print(f"\n[bold]Task {task_id}[/bold] - {task_name}")
-
-                for level in ["L0", "L1", "L2"]:
-                    if level not in levels:
-                        continue
-                    result = levels[level]
-                    score = result.get("score", 0)
-                    color = _score_color(score)
-
-                    # Get subtask results from DB for this specific level
-                    task_result_id = db.conn.execute(
-                        "SELECT id FROM task_results WHERE run_id = ? AND task_id = ? AND autonomy_level = ?",
-                        (run_id, task_id, level)
-                    ).fetchone()
-
-                    if task_result_id:
-                        subtasks = db.get_subtask_results(task_result_id["id"])
-                        if subtasks:
-                            console.print(f"\n  [{color}]{level} (score: {score:.2f})[/{color}]")
-                            for s in subtasks:
-                                status = "[green]✓[/green]" if s["passed"] else "[red]✗[/red]"
-                                console.print(f"    {status} {s['subtask_id']}: {s['description']}")
-                                # Show evidence in detailed mode
-                                if s.get("evidence"):
-                                    console.print(f"       [dim]{s['evidence']}[/dim]")
-
-                    if result.get("error"):
-                        console.print(f"    [red]Error: {result['error']}[/red]")
+                _print_task_details_full(console, db, run_id, task_id, task_name, levels)
             else:
-                # Non-detailed: show subtasks once (from first available level)
-                for level in ["L0", "L1", "L2"]:
-                    if level not in levels:
-                        continue
-                    result = levels[level]
+                _print_task_details_summary(console, db, run_id, task_id, task_name, levels)
 
-                    task_result_id = db.conn.execute(
-                        "SELECT id FROM task_results WHERE run_id = ? AND task_id = ? AND autonomy_level = ?",
-                        (run_id, task_id, level)
-                    ).fetchone()
 
-                    if task_result_id:
-                        subtasks = db.get_subtask_results(task_result_id["id"])
-                        if subtasks:
-                            console.print(f"\n[bold]Task {task_id}[/bold] - {task_name[:60] if len(task_name) > 60 else task_name}")
-                            for s in subtasks:
-                                status = "[green]✓[/green]" if s["passed"] else "[red]✗[/red]"
-                                desc = s['description']
-                                console.print(f"  {status} {s['subtask_id']}: {desc[:70] if len(desc) > 70 else desc}")
+def _print_task_details_full(console, db: ResultsDB, run_id: int, task_id: int,
+                              task_name: str, levels: dict[str, dict]):
+    """Print detailed subtask info for all autonomy levels."""
+    console.print(f"\n[bold]Task {task_id}[/bold] - {task_name}")
 
-                            if result.get("error"):
-                                console.print(f"  [red]Error: {result['error']}[/red]")
-                    break  # Only show subtasks once per task in non-detailed mode
+    for level in AUTONOMY_LEVELS:
+        if level not in levels:
+            continue
+
+        result = levels[level]
+        score = result.get("score", 0)
+        color = _score_color(score)
+
+        task_result_id = db.get_task_result_id(run_id, task_id, level)
+        if task_result_id:
+            subtasks = db.get_subtask_results(task_result_id)
+            if subtasks:
+                console.print(f"\n  [{color}]{level} (score: {score:.2f})[/{color}]")
+                for s in subtasks:
+                    _print_subtask_status(console, s, "    ", show_evidence=True)
+
+        if result.get("error"):
+            console.print(f"    [red]Error: {result['error']}[/red]")
+
+
+def _print_task_details_summary(console, db: ResultsDB, run_id: int, task_id: int,
+                                 task_name: str, levels: dict[str, dict]):
+    """Print summary subtask info from first available level only."""
+    first = _get_first_available_level(levels)
+    if not first:
+        return
+
+    level, result = first
+    task_result_id = db.get_task_result_id(run_id, task_id, level)
+    if not task_result_id:
+        return
+
+    subtasks = db.get_subtask_results(task_result_id)
+    if not subtasks:
+        return
+
+    console.print(f"\n[bold]Task {task_id}[/bold] - {_truncate(task_name, 60)}")
+    for s in subtasks:
+        s_truncated = {**s, 'description': _truncate(s['description'], 70)}
+        _print_subtask_status(console, s_truncated, "  ")
+
+    if result.get("error"):
+        console.print(f"  [red]Error: {result['error']}[/red]")

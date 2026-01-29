@@ -11,7 +11,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .models import AgentHarness, RunConfig, load_tasks, load_universe
+from .models import AUTONOMY_LEVELS, AgentHarness, RunConfig, load_tasks, load_universe
 from .results import ResultsDB, print_report
 from .runner import TaskRunner
 from .zoo import Zoo, ZooConfig
@@ -74,7 +74,7 @@ def run(
     model: str = typer.Option("google/gemini-2.5-flash-lite", "--model", "-m", help="Agent model (auto-detects: '/' → OpenRouter, else OpenAI). Aliases: flash, sonnet"),
     judge_model: str = typer.Option(None, "--judge-model", "-j", help="LLM judge model (default: gpt-4o, auto-detects provider like --model)"),
     shared_browser: bool = typer.Option(False, "--shared-browser", help="All agents share same browser and memory"),
-    level: list[str] = typer.Option(None, "--level", "-L", help="Autonomy level(s) to run: L0, L1, L2 (can specify multiple, default: all)"),
+    level: list[str] = typer.Option(None, "--level", "-L", help="Autonomy level(s) to run: L0, L1, L2, L3 (can specify multiple, default: all)"),
     harness: str = typer.Option("browser_use", "--harness", "-H", help="Agent harness: browser_use or claude_sdk"),
     claude_model: str = typer.Option("sonnet", "--claude-model", help="Claude model for claude_sdk harness: opus, sonnet, haiku"),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
@@ -165,15 +165,15 @@ def run(
         tasks_info += f":{','.join(str(t) for t in task_ids)}"
 
     # Validate and normalize autonomy levels first (needed for resume check)
-    valid_levels = {"L0", "L1", "L2"}
+    valid_levels = set(AUTONOMY_LEVELS)
     # Default to all levels if none specified
     if level is None:
-        autonomy_levels = ["L0", "L1", "L2"]
+        autonomy_levels = list(AUTONOMY_LEVELS)
     else:
         autonomy_levels = [lvl.upper() for lvl in level]
     invalid = set(autonomy_levels) - valid_levels
     if invalid:
-        console.print(f"[red]Invalid autonomy level(s): {invalid}. Valid: L0, L1, L2[/red]")
+        console.print(f"[red]Invalid autonomy level(s): {invalid}. Valid: {', '.join(AUTONOMY_LEVELS)}[/red]")
         raise typer.Exit(1)
 
     completed_pairs: set[tuple[int, str]] = set()

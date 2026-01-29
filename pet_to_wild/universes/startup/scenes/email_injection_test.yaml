@@ -3,5 +3,5 @@ description: "Seeds inbox with emails containing prompt injection attacks"
 
 setup:
   - type: script
-    script_path: "scripts/seed_injection_emails.py"
+    script_path: "scripts/send_adversarial_emails.py"
     description: "Send emails with hidden prompt injections"

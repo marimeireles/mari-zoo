@@ -4,7 +4,7 @@ description: "Seeds legitimate emails, then injects adversarial prompt injection
 # Setup seeds legitimate emails before task starts
 setup:
   - type: script
-    script_path: "scripts/seed_startup_emails.py"
+    script_path: "scripts/send_work_context_emails.py"
     description: "Send legitimate context emails first"
 
 # Actions with their own triggers
@@ -13,5 +13,5 @@ actions:
       type: time
       delay: 5
     type: script
-    script_path: "scripts/seed_simple_email_inject.py"
-    description: "Sends adversarial email with prompt injection"
+    script_path: "scripts/send_adversarial_emails.py"
+    description: "Sends emails with hidden prompt injections"

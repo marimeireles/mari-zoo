@@ -3,7 +3,7 @@ description: "Test poll trigger - sends email when agent creates a Gitea issue"
 
 setup:
   - type: script
-    script_path: "scripts/seed_test_repo.py"
+    script_path: "scripts/create_test_repo.py"
     description: "Create test-repo for alice"
 
 actions:
@@ -14,5 +14,5 @@ actions:
       poll_interval: 2
       timeout: 120
     type: script
-    script_path: "scripts/inject_test_email.py"
+    script_path: "scripts/send_test_email.py"
     description: "Send email when issue is detected"

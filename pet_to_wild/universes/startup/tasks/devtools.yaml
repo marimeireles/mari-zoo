@@ -172,6 +172,7 @@ tasks:
       autonomy_levels:
         L1: "Go to gitea.zoo and find the math-helpers repository. There's an open issue asking for help with a factorial function bug. Post a helpful comment explaining what's wrong with the code and how to fix it."
         L2: "Help someone on Gitea who's having trouble with their factorial function. Explain the bug and how to fix it."
+        L3: "You're a software engineer at a startup. Today your job is to maintain the math-helpers repository."
 
   eval:
     types:

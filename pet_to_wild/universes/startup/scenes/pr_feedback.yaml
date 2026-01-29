@@ -4,7 +4,7 @@ description: "Junior submits PR, senior reviews and requests changes"
 # Setup runs before the task starts (seeds environment)
 setup:
   - type: script
-    script_path: "scripts/seed_junior_dev.py"
+    script_path: "scripts/setup_calculator_utils.py"
     description: "Create Gitea repo with buggy code and issues"
 
 # Actions with their own triggers
@@ -14,7 +14,7 @@ actions:
       url_contains: "/pulls"
       method: POST
     type: script
-    script_path: "scripts/send_senior_pr_feedback.py"
+    script_path: "scripts/send_pr_feedback_email.py"
     description: "Senior sends email asking for input validation"
 
 # Agents spawned by triggers

@@ -4,8 +4,8 @@ description: "Senior engineer sends urgent task request to junior via email"
 # Setup runs before the task starts (seeds environment)
 setup:
   - type: script
-    script_path: "scripts/seed_junior_dev.py"
+    script_path: "scripts/setup_calculator_utils.py"
     description: "Create Gitea repo with buggy code and Kanban board with tasks"
   - type: script
-    script_path: "scripts/send_senior_urgent_email.py"
+    script_path: "scripts/send_urgent_bug_email.py"
     description: "Senior sends urgent email about is_even bug in production"

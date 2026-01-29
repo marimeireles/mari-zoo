@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -16,6 +17,40 @@ class EvalResult:
     passed: bool
     eval_type: EvalType
     details: str = ""
+
+
+def _check_must_include(answer: str, required_values: list[str]) -> tuple[list[str], list[str]]:
+    """Check which required values are present in the answer.
+
+    Args:
+        answer: The answer string to check (should already be lowercased)
+        required_values: List of values that must be present
+
+    Returns:
+        Tuple of (matched values, missing values)
+    """
+    matched = [v for v in required_values if v.lower() in answer]
+    missing = [v for v in required_values if v.lower() not in answer]
+    return matched, missing
+
+
+def _format_match_result(
+    matched: list[str], missing: list[str], eval_type: EvalType
+) -> EvalResult:
+    """Format a must_include match result into an EvalResult."""
+    total = len(matched) + len(missing)
+    if not missing:
+        return EvalResult(
+            passed=True,
+            eval_type=eval_type,
+            details=f"Includes all {total} required values",
+        )
+    found = len(matched)
+    return EvalResult(
+        passed=False,
+        eval_type=eval_type,
+        details=f"Partial: {found}/{total} ({100*found//total}%). Found: {matched}. Missing: {missing}",
+    )
 
 
 class Evaluator(ABC):
@@ -66,22 +101,8 @@ class StringMatchEvaluator(Evaluator):
 
         # Must include all
         if ref.must_include:
-            matched = [s for s in ref.must_include if s.lower() in answer]
-            missing = [s for s in ref.must_include if s.lower() not in answer]
-            total = len(ref.must_include)
-            found = len(matched)
-
-            if not missing:
-                return EvalResult(
-                    passed=True,
-                    eval_type=EvalType.STRING_MATCH,
-                    details=f"Includes all {total} required values",
-                )
-            return EvalResult(
-                passed=False,
-                eval_type=EvalType.STRING_MATCH,
-                details=f"Partial: {found}/{total} ({100*found//total}%). Found: {matched}. Missing: {missing}",
-            )
+            matched, missing = _check_must_include(answer, ref.must_include)
+            return _format_match_result(matched, missing, EvalType.STRING_MATCH)
 
         return EvalResult(
             passed=False,
@@ -225,22 +246,8 @@ class DBMatchEvaluator(Evaluator):
         answer = result.agent_answer.lower()
 
         if db_query.match_type == "must_include":
-            matched = [v for v in expected_values if v.lower() in answer]
-            missing = [v for v in expected_values if v.lower() not in answer]
-            total = len(expected_values)
-            found = len(matched)
-
-            if not missing:
-                return EvalResult(
-                    passed=True,
-                    eval_type=EvalType.DB_MATCH,
-                    details=f"Includes all {total} expected values",
-                )
-            return EvalResult(
-                passed=False,
-                eval_type=EvalType.DB_MATCH,
-                details=f"Partial: {found}/{total} ({100*found//total}%). Found: {matched}. Missing: {missing}",
-            )
+            matched, missing = _check_must_include(answer, expected_values)
+            return _format_match_result(matched, missing, EvalType.DB_MATCH)
 
         elif db_query.match_type == "exact_match":
             if len(expected_values) == 1 and expected_values[0].lower() in answer:
@@ -341,8 +348,6 @@ Check each numbered criterion. Respond with JSON:
             )
 
             # Parse response
-            import json
-
             result_json = json.loads(response.choices[0].message.content)
             passed = result_json.get("passed", False)
             reasoning = result_json.get("reasoning", "No reasoning provided")
@@ -373,7 +378,6 @@ class HumanCriticEvaluator(Evaluator):
         """Generate review files for human to evaluate."""
         from datetime import datetime
         from pathlib import Path
-        import json
 
         # Create directory structure: human_reviews/{date}/{universe}/{task_id}/
         timestamp = datetime.now().strftime("%Y-%m-%d")
@@ -554,20 +558,25 @@ def get_evaluator(
         universe_name: Universe name (for HUMAN_CRITIC file organization)
         judge_model: Model to use for LLM_JUDGE (auto-detects provider)
     """
-    if eval_type == EvalType.STRING_MATCH:
-        return StringMatchEvaluator()
-    elif eval_type == EvalType.DB_MATCH:
-        return DBMatchEvaluator()
-    elif eval_type == EvalType.LLM_JUDGE:
+    # Simple evaluators that need no config
+    simple_evaluators = {
+        EvalType.STRING_MATCH: StringMatchEvaluator,
+        EvalType.DB_MATCH: DBMatchEvaluator,
+        EvalType.CUSTOM_FUNCTION: CustomFunctionEvaluator,
+    }
+
+    if eval_type in simple_evaluators:
+        return simple_evaluators[eval_type]()
+
+    if eval_type == EvalType.LLM_JUDGE:
         return LLMJudgeEvaluator(judge_model=judge_model)
-    elif eval_type == EvalType.HUMAN_CRITIC:
+
+    if eval_type == EvalType.HUMAN_CRITIC:
         if task is None:
             raise ValueError("HumanCriticEvaluator requires task parameter")
         return HumanCriticEvaluator(task=task, universe_name=universe_name)
-    elif eval_type == EvalType.CUSTOM_FUNCTION:
-        return CustomFunctionEvaluator()
-    else:
-        raise ValueError(f"Unknown eval type: {eval_type}")
+
+    raise ValueError(f"Unknown eval type: {eval_type}")
 
 
 def compute_score(subtask_results: list[SubtaskResult]) -> float:
