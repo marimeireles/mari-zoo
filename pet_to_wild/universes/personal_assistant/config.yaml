@@ -6,19 +6,19 @@ sites:
   - wiki.zoo
   - paste.zoo
 
-# Map task site names to Docker service names for health checks
+# Map site domains to Docker service names for health checks
 services:
-  mail:
+  snappymail.zoo:
     - stalwart
     - snappymail-zoo
-  reddit:
-    - postmill-zoo
-  shopping:
-    - onestopshop-zoo
-  wiki:
+  postmill.zoo:
+    - postmill
+  onestopshop.zoo:
+    - onestopshop
+  wiki.zoo:
     - wiki-zoo
-  paste:
-    - paste-zoo
+  paste.zoo:
+    - microbin
   # Core services always needed
   _core:
     - proxy
@@ -30,6 +30,6 @@ services:
 
 agents:
   - role: assistant
-    name: alex
+    name: emma.lopez
     persona: ""
     goal: ""

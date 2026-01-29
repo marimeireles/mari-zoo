@@ -41,6 +41,26 @@ class BaseAgentRunner(ABC):
                 return agent
         return None
 
+    def _resolve_model(self, agent_config: TaskAgentConfig) -> str:
+        """Resolve the model for an agent using hierarchy: Task > Universe > CLI.
+
+        Priority (highest to lowest):
+        1. Task agent config model (specified in task file)
+        2. Universe agent config model (specified in universe config)
+        3. CLI default model (passed via command line / RunConfig)
+        """
+        # Highest priority: task-level model
+        if agent_config.model:
+            return agent_config.model
+
+        # Medium priority: universe-level model
+        universe_agent = self._get_universe_agent(agent_config.name)
+        if universe_agent and universe_agent.model:
+            return universe_agent.model
+
+        # Lowest priority: CLI default
+        return self.config.model
+
     def _build_agent_context(self, agent_config: TaskAgentConfig) -> str:
         """Build the agent context string from universe config."""
         universe_agent = self._get_universe_agent(agent_config.name)

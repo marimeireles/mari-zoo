@@ -11,7 +11,7 @@ tasks:
   environment: domesticated
 
   agents:
-    alex:
+    emma.lopez:
       require_login: false
       autonomy_levels:
         L0: "1. Look at the wiki homepage 2. Find the main heading or title 3. Report what you see"

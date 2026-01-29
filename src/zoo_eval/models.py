@@ -347,6 +347,7 @@ class AgentConfig:
     name: str
     persona: str
     goal: str  # Individual agent's goal
+    model: str | None = None  # Model override for this agent (overrides CLI default)
 
     @classmethod
     def from_dict(cls, data: dict) -> AgentConfig:
@@ -355,6 +356,7 @@ class AgentConfig:
             name=data["name"],
             persona=data["persona"],
             goal=data["goal"],
+            model=data.get("model"),
         )
 
 
@@ -367,6 +369,7 @@ class TaskAgentConfig:
     username: str | None = None
     password: str | None = None
     autonomy_levels: dict[str, str] = field(default_factory=dict)
+    model: str | None = None  # Model override for this agent (highest priority, overrides universe and CLI)
 
     @classmethod
     def from_dict(cls, name: str, data: dict) -> TaskAgentConfig:
@@ -376,6 +379,7 @@ class TaskAgentConfig:
             username=data.get("username"),
             password=data.get("password"),
             autonomy_levels=data.get("autonomy_levels", {}),
+            model=data.get("model"),
         )
 
 

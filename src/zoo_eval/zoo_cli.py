@@ -511,3 +511,222 @@ def check_inbox(user: str, password: str, folder: str = "INBOX") -> int | None:
         pass
 
     return None
+
+
+# =============================================================================
+# Postmill (Reddit-like) API (Direct HTTP)
+# =============================================================================
+
+class PostmillSession:
+    """Authenticated session for Postmill API calls.
+
+    Postmill uses session cookies and CSRF tokens for authentication.
+    This class manages the session state across multiple requests.
+    """
+
+    def __init__(self, username: str, password: str):
+        self.username = username
+        self.password = password
+        self._cookies: dict[str, str] = {}
+        self._csrf_token: str | None = None
+        self._logged_in = False
+
+    def _request(
+        self,
+        endpoint: str,
+        method: str = "GET",
+        data: dict | None = None,
+        json_body: dict | None = None,
+    ) -> Any:
+        """Make a request to Postmill."""
+        import httpx
+
+        proxy_port = _get_proxy_port()
+        proxy_url = f"http://localhost:{proxy_port}"
+
+        with httpx.Client(proxy=proxy_url, verify=False, timeout=30.0, follow_redirects=True) as client:
+            url = f"http://postmill.zoo{endpoint}"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Zoo Seed Script)",
+            }
+
+            if self._cookies:
+                headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
+
+            if method == "POST" and self._csrf_token:
+                if data is None:
+                    data = {}
+                data["_token"] = self._csrf_token
+
+            response = client.request(
+                method=method,
+                url=url,
+                headers=headers,
+                data=data,
+                json=json_body,
+            )
+
+            # Store any cookies from response
+            for cookie in response.cookies.jar:
+                self._cookies[cookie.name] = cookie.value
+
+            return response
+
+    def _extract_csrf_token(self, html: str) -> str | None:
+        """Extract CSRF token from HTML page."""
+        import re
+        # Look for hidden input with name="_token" or "csrf_token"
+        match = re.search(r'name=["\']_token["\'][^>]*value=["\']([^"\']+)["\']', html)
+        if match:
+            return match.group(1)
+        match = re.search(r'value=["\']([^"\']+)["\'][^>]*name=["\']_token["\']', html)
+        if match:
+            return match.group(1)
+        return None
+
+    def login(self) -> bool:
+        """Login to Postmill and establish session."""
+        # Get login page to extract CSRF token
+        response = self._request("/login")
+        if response.status_code != 200:
+            raise RuntimeError(f"Failed to get login page: {response.status_code}")
+
+        self._csrf_token = self._extract_csrf_token(response.text)
+        if not self._csrf_token:
+            raise RuntimeError("Could not find CSRF token on login page")
+
+        # Submit login form
+        response = self._request(
+            "/login",
+            method="POST",
+            data={
+                "_username": self.username,
+                "_password": self.password,
+                "_remember_me": "on",
+            },
+        )
+
+        # Check if login succeeded (should redirect to home or show username)
+        self._logged_in = self.username.lower() in response.text.lower() or response.status_code == 200
+        return self._logged_in
+
+    def get_submissions(self, forum: str = "all", sort: str = "new", limit: int = 25) -> list[dict]:
+        """Get list of submissions from a forum."""
+        response = self._request(f"/f/{forum}/{sort}")
+        if response.status_code != 200:
+            return []
+
+        # Parse submission IDs and titles from HTML
+        import re
+        submissions = []
+        # Look for submission links: /f/{forum}/{id}/-/{slug}
+        pattern = r'href=["\']/f/([^/]+)/(\d+)/-/([^"\']+)["\'][^>]*>([^<]+)</a>'
+        matches = re.findall(pattern, response.text)
+        for forum_name, sub_id, slug, title in matches[:limit]:
+            submissions.append({
+                "id": int(sub_id),
+                "forum": forum_name,
+                "slug": slug,
+                "title": title.strip(),
+            })
+        return submissions
+
+    def get_submission(self, submission_id: int) -> dict | None:
+        """Get a single submission by ID."""
+        # We need to find the submission URL first
+        submissions = self.get_submissions(limit=50)
+        for sub in submissions:
+            if sub["id"] == submission_id:
+                response = self._request(f"/f/{sub['forum']}/{sub['id']}/-/{sub['slug']}")
+                if response.status_code == 200:
+                    sub["html"] = response.text
+                    # Extract CSRF token for commenting
+                    self._csrf_token = self._extract_csrf_token(response.text)
+                return sub
+        return None
+
+    def create_comment(
+        self,
+        submission_id: int,
+        body: str,
+        parent_id: int | None = None,
+    ) -> dict:
+        """Create a comment on a submission."""
+        if not self._logged_in:
+            self.login()
+
+        # Get the submission page to get CSRF token and form action
+        submission = self.get_submission(submission_id)
+        if not submission:
+            raise RuntimeError(f"Submission {submission_id} not found")
+
+        # Post comment
+        endpoint = f"/f/{submission['forum']}/{submission_id}/-/{submission['slug']}/comment"
+        data = {
+            "comment[body]": body,
+        }
+        if parent_id:
+            data["comment[parent]"] = str(parent_id)
+
+        response = self._request(endpoint, method="POST", data=data)
+
+        if response.status_code >= 400:
+            raise RuntimeError(f"Failed to create comment: {response.status_code}")
+
+        return {"success": True, "submission_id": submission_id}
+
+
+def postmill_login(username: str, password: str) -> PostmillSession:
+    """Login to Postmill and return authenticated session.
+
+    Args:
+        username: Postmill username
+        password: Postmill password
+
+    Returns:
+        PostmillSession object for making authenticated requests
+    """
+    session = PostmillSession(username, password)
+    if not session.login():
+        raise RuntimeError(f"Failed to login to Postmill as {username}")
+    return session
+
+
+def postmill_list_submissions(
+    session: PostmillSession,
+    forum: str = "all",
+    sort: str = "new",
+    limit: int = 25,
+) -> list[dict]:
+    """List submissions from a Postmill forum.
+
+    Args:
+        session: Authenticated PostmillSession
+        forum: Forum name (default "all" for all forums)
+        sort: Sort order ("new", "hot", "top", etc.)
+        limit: Maximum number of submissions to return
+
+    Returns:
+        List of submission dicts with id, forum, slug, title
+    """
+    return session.get_submissions(forum=forum, sort=sort, limit=limit)
+
+
+def postmill_create_comment(
+    session: PostmillSession,
+    submission_id: int,
+    body: str,
+    parent_id: int | None = None,
+) -> dict:
+    """Create a comment on a Postmill submission.
+
+    Args:
+        session: Authenticated PostmillSession
+        submission_id: ID of the submission to comment on
+        body: Comment text (supports markdown)
+        parent_id: Optional parent comment ID for replies
+
+    Returns:
+        Dict with success status
+    """
+    return session.create_comment(submission_id, body, parent_id)

@@ -581,6 +581,22 @@ zoo-eval run startup --task email --model gpt-4o
 zoo-eval run startup --task devtools --harness claude_sdk --claude-model opus
 ```
 
+### Per-Agent Models
+
+Override the CLI `--model` default for specific agents. Priority: **Task > Universe > CLI**.
+
+```yaml
+# Universe config - agent uses this model for all tasks
+agents:
+  - name: alice
+    model: anthropic/claude-sonnet-4
+
+# Task file - override for this task only
+agents:
+  alice:
+    model: google/gemini-2.5-flash
+```
+
 ### Environment Setup
 
 ```bash

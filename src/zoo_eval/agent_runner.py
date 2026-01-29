@@ -104,18 +104,23 @@ class AgentRunner(BaseAgentRunner):
         universe: Universe | None = None,
     ):
         super().__init__(zoo, config, universe_path, universe)
-        self._llm = None
+        self._llm_cache: dict[str, Any] = {}  # Cache LLMs by model name
 
     async def setup(self):
         """Initialize browser_use components."""
         os.environ["ANONYMIZED_TELEMETRY"] = "false"
-        self._llm = self._create_llm()
 
-    def _create_llm(self):
-        """Create LLM based on model config."""
+    def _get_llm(self, agent_config: TaskAgentConfig):
+        """Get or create LLM for an agent based on resolved model."""
         from .llm import create_chat_openai
 
-        return create_chat_openai(self.config.model)
+        model = self._resolve_model(agent_config)
+
+        # Cache LLMs to avoid recreating for same model
+        if model not in self._llm_cache:
+            self._llm_cache[model] = create_chat_openai(model)
+
+        return self._llm_cache[model]
 
     async def teardown(self):
         """Clean up resources."""
@@ -149,7 +154,7 @@ class AgentRunner(BaseAgentRunner):
 
             agent = Agent(
                 task=full_task,
-                llm=self._llm,
+                llm=self._get_llm(agent_config),
                 browser=browser,
                 extend_system_message=agent_context,
                 sensitive_data=SENSITIVE_DATA,
@@ -231,7 +236,7 @@ class AgentRunner(BaseAgentRunner):
 
                     agent = Agent(
                         task=full_task,
-                        llm=self._llm,
+                        llm=self._get_llm(agent_config),
                         browser=browser,
                         extend_system_message=agent_context,
                         sensitive_data=SENSITIVE_DATA,
