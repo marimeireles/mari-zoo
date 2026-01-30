@@ -1,10 +1,17 @@
-"""Agent task runner for browser-use harness."""
+"""browser_use harness implementation.
+
+This module provides the BrowserUseRunner class for running tasks
+using the browser_use library. It's one of several harness implementations.
+
+For harness-agnostic code, see base_agent_runner.py and event_source.py.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -23,28 +30,18 @@ SENSITIVE_DATA = {
 }
 
 
-def _create_step_hook(browser, scene_manager=None):
-    """Create a step hook that captures page HTML and attaches scene manager.
+def _create_step_hook(browser):
+    """Create a step hook that captures page HTML after each agent step.
 
     Args:
         browser: browser_use Browser instance
-        scene_manager: Optional SceneManager to attach on first step
 
     Returns:
         Tuple of (step_hook function, last_page_html dict for retrieving captured data)
     """
     last_page_html = {'html': None, 'url': None}
-    page_attached = {'done': False}
 
     async def step_hook(agent_instance):
-        # Attach scene manager on first step (when page exists)
-        if scene_manager and not page_attached['done']:
-            try:
-                await scene_manager.attach_to_browser(browser)
-                page_attached['done'] = True
-            except Exception:
-                pass
-
         # Capture page HTML after each step
         try:
             cdp_session = await agent_instance.browser_session.get_or_create_cdp_session()
@@ -93,7 +90,7 @@ def _aggregate_agent_results(
     )
 
 
-class AgentRunner(BaseAgentRunner):
+class BrowserUseRunner(BaseAgentRunner):
     """Runs tasks using browser-use. Supports single and multi-agent execution."""
 
     def __init__(
@@ -160,7 +157,7 @@ class AgentRunner(BaseAgentRunner):
                 sensitive_data=SENSITIVE_DATA,
             )
 
-            step_hook, last_page_html = _create_step_hook(browser, scene_manager)
+            step_hook, last_page_html = _create_step_hook(browser)
 
             try:
                 result = await asyncio.wait_for(
@@ -326,10 +323,29 @@ class AgentRunner(BaseAgentRunner):
             # - If you need isolated state per level, run levels separately with --level
             scene_manager = None
             if task.scene_name:
+                # Create event source if proxy events are enabled (only needed with scenes)
+                event_source = None
+                if self.config.use_proxy_events:
+                    from .proxy_event_source import ProxyEventSource
+                    session_id = str(uuid.uuid4())
+                    event_source = ProxyEventSource(
+                        redis_url=self.config.redis_url,
+                        session_id=session_id,
+                    )
+
                 universe_sites = self.universe.sites if self.universe else []
-                scene_manager = SceneManager(self.zoo, self.universe_path, universe_sites)
+                scene_manager = SceneManager(
+                    self.zoo,
+                    self.universe_path,
+                    universe_sites,
+                    event_source=event_source,
+                )
                 await scene_manager.load_and_setup(task.scene_name)
                 scene_manager.start_time = task_start_time
+
+                # If using proxy events, set up triggers now (before browser starts)
+                if event_source:
+                    await scene_manager.setup_triggers()
 
             try:
                 # Get agents list from task

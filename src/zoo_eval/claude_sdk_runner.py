@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -210,8 +211,32 @@ class ClaudeSDKRunner(BaseAgentRunner):
             # Activate scene once per task
             scene_manager = None
             if task.scene_name:
-                scene_manager = SceneManager(self.zoo, self.universe_path)
-                await scene_manager.load_and_activate_scene(task.scene_name, task_start_time)
+                # Create event source if proxy events are enabled (only needed with scenes)
+                event_source = None
+                if self.config.use_proxy_events:
+                    from .proxy_event_source import ProxyEventSource
+                    session_id = str(uuid.uuid4())
+                    event_source = ProxyEventSource(
+                        redis_url=self.config.redis_url,
+                        session_id=session_id,
+                    )
+
+                universe_sites = self.universe.sites if self.universe else []
+                scene_manager = SceneManager(
+                    self.zoo,
+                    self.universe_path,
+                    universe_sites,
+                    event_source=event_source,
+                )
+
+                if event_source:
+                    # Use new setup_triggers flow for proxy-based events
+                    await scene_manager.load_and_setup(task.scene_name)
+                    scene_manager.start_time = task_start_time
+                    await scene_manager.setup_triggers()
+                else:
+                    # Legacy flow for CDP-based triggers
+                    await scene_manager.load_and_activate_scene(task.scene_name, task_start_time)
 
             try:
                 agents = list(task.agents.values())

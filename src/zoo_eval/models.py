@@ -39,6 +39,9 @@ class RunConfig:
     completed_pairs: set[tuple[int, str]] = field(default_factory=set)  # (task_id, level) pairs to skip (for resume)
     harness: AgentHarness = AgentHarness.BROWSER_USE  # Which agent harness to use
     claude_model: str = "sonnet"  # Claude model for Claude SDK harness ("opus", "sonnet", "haiku")
+    # Proxy-based event source configuration (harness-agnostic scene triggers)
+    use_proxy_events: bool = False  # Use Redis pub/sub for scene triggers instead of CDP
+    redis_url: str = "redis://localhost:6379"  # Redis URL for proxy event source
 
 
 class EvalType(str, Enum):

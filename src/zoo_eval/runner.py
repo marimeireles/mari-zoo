@@ -37,9 +37,9 @@ def create_agent_runner(
 
         return ClaudeSDKRunner(zoo, config, universe_path, universe)
     else:
-        from .agent_runner import AgentRunner
+        from .browser_use_runner import BrowserUseRunner
 
-        return AgentRunner(zoo, config, universe_path, universe)
+        return BrowserUseRunner(zoo, config, universe_path, universe)
 
 
 @dataclass

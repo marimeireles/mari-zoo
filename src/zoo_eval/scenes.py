@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import subprocess
@@ -16,6 +17,9 @@ from .models import Scene, Trigger, ActionPayload, AgentTrigger, load_scene
 
 if TYPE_CHECKING:
     from .zoo import Zoo
+    from .event_source import EventSource
+
+logger = logging.getLogger(__name__)
 
 # Type alias - browser_use uses its own Page wrapper, not Playwright
 Page = object
@@ -24,14 +28,47 @@ Page = object
 class SceneManager:
     """Manages scene activation and verification.
 
-    Supports CDP-based request triggers that fire when the browser
-    makes requests matching specified URL patterns.
+    ## Generic API (works with any harness)
+
+    Use these methods for harness-agnostic scene management:
+
+        scene_manager = SceneManager(zoo, universe_path, event_source=my_event_source)
+        await scene_manager.load_and_setup("scene_name")  # Runs setup scripts
+        await scene_manager.setup_triggers()               # Sets up all triggers
+        # ... run your agent ...
+        await scene_manager.cleanup()
+
+    ## browser_use-specific API (legacy)
+
+    The attach_to_browser() method uses CDP and only works with browser_use:
+
+        scene_manager = SceneManager(zoo, universe_path)  # No event_source
+        await scene_manager.load_and_setup("scene_name")
+        # Later, when browser is ready:
+        await scene_manager.attach_to_browser(browser)    # browser_use only!
     """
 
-    def __init__(self, zoo: Zoo, universe_path: Path | None = None, universe_sites: list[str] | None = None):
+    def __init__(
+        self,
+        zoo: "Zoo",
+        universe_path: Path | None = None,
+        universe_sites: list[str] | None = None,
+        event_source: "EventSource | None" = None,
+    ):
+        """Initialize SceneManager.
+
+        Args:
+            zoo: Zoo instance for environment access
+            universe_path: Path to the universe directory
+            universe_sites: List of sites in the universe
+            event_source: Optional EventSource for proxy-based triggers.
+                         If None, falls back to CDP when browser is attached.
+        """
         self.zoo = zoo
         self.universe_path = universe_path
         self.universe_sites = universe_sites or []
+        self.event_source = event_source
+
         self.active_tasks: list[asyncio.Task] = []
         self.start_time: float | None = None
         self.actions_log: list[dict] = []  # Track all actions for verification
@@ -39,6 +76,8 @@ class SceneManager:
         self._scene: Scene | None = None  # Current active scene
         self._browsers: list = []  # Browser instances for CDP triggers
         self._trigger_events: dict[str, asyncio.Event] = {}  # Track fired triggers by action id
+        self._handler_ids: list[str] = []  # Track EventSource handler IDs for cleanup
+        self._event_source_started = False
 
     def get_agent_triggers(self) -> list[AgentTrigger]:
         """Get agent triggers from the active scene."""
@@ -92,121 +131,105 @@ class SceneManager:
 
         return scene
 
-    async def attach_to_browser(self, browser):
-        """Attach to a browser to enable CDP-based triggers.
+    async def start_event_source(self) -> None:
+        """Start the event source if configured.
 
-        Can be called multiple times for multi-agent scenarios.
-        Each browser will have listeners attached for request triggers.
-
-        Args:
-            browser: browser_use Browser instance
+        Call this before setting up triggers. Can be called multiple times safely.
         """
-        self._browsers.append(browser)
+        if self.event_source and not self._event_source_started:
+            await self.event_source.start()
+            self._event_source_started = True
+            logger.info("EventSource started for SceneManager")
 
+    async def setup_triggers(self) -> None:
+        """Set up all triggers for the current scene.
+
+        This is the preferred method when using proxy-based event source.
+        For CDP-based triggers, use attach_to_browser() instead.
+        """
         if self._scene is None:
             return
 
-        # First browser attachment: set up non-browser-specific triggers
-        is_first_browser = len(self._browsers) == 1
+        # Start event source if needed
+        await self.start_event_source()
 
         for action in self._scene.actions:
             action_id = f"{action.script_path}_{id(action)}"
 
             if action.trigger is None:
-                if is_first_browser:
-                    await self._run_single_action(action)
+                await self._run_single_action(action)
             elif action.trigger.trigger_type == "request":
-                await self._setup_request_trigger_cdp(action, browser, action_id)
+                await self._setup_request_trigger(action, action_id)
             elif action.trigger.trigger_type == "poll":
-                if is_first_browser:
-                    task = asyncio.create_task(self._setup_poll_trigger(action, action_id))
-                    self.active_tasks.append(task)
+                task = asyncio.create_task(self._setup_poll_trigger(action, action_id))
+                self.active_tasks.append(task)
             elif action.trigger.trigger_type == "time":
-                if is_first_browser:
-                    if action.trigger.delay == 0:
-                        await self._run_single_action(action)
-                    else:
-                        task = asyncio.create_task(self._schedule_time_action(action))
-                        self.active_tasks.append(task)
-            elif action.trigger.trigger_type == "page_load":
-                if is_first_browser:
+                if action.trigger.delay == 0:
                     await self._run_single_action(action)
+                else:
+                    task = asyncio.create_task(self._schedule_time_action(action))
+                    self.active_tasks.append(task)
+            elif action.trigger.trigger_type == "page_load":
+                await self._run_single_action(action)
 
-    async def _setup_request_trigger_cdp(self, action: ActionPayload, browser, action_id: str):
-        """Set up a CDP Network event listener for HTTP requests."""
+    async def _setup_request_trigger(self, action: ActionPayload, action_id: str) -> None:
+        """Set up a request trigger using EventSource (proxy) or CDP (fallback)."""
         if not action.trigger:
             return
 
         trigger = action.trigger
-        url_pattern = trigger.url_contains or trigger.url_pattern
-        if not url_pattern:
+
+        # Build the URL pattern
+        if trigger.url_pattern:
+            pattern = trigger.url_pattern
+        elif trigger.url_contains:
+            # Convert simple contains to regex pattern
+            pattern = re.escape(trigger.url_contains)
+        else:
+            logger.warning(f"Request trigger missing url_pattern or url_contains")
             return
 
-        # Create or get shared event for this action (across all browsers)
+        # Create or get shared event for this action
         if action_id not in self._trigger_events:
             self._trigger_events[action_id] = asyncio.Event()
         fired_event = self._trigger_events[action_id]
 
-        # Track state for wait_for_load
-        url_matched = {"value": False}
-        load_event = asyncio.Event()
-
-        def on_network_request(params, session_id):
-            """Handle Network.requestWillBeSent CDP events."""
-            request_info = params.get("request", {})
-            url = request_info.get("url", "")
-            method = request_info.get("method", "GET")
-
+        # Define the handler
+        async def on_request_match(event):
             if fired_event.is_set():
                 return  # Already fired
 
             # Check method if specified
-            if trigger.method and method.upper() != trigger.method.upper():
+            if trigger.method and event.method.upper() != trigger.method.upper():
                 return
 
-            # Check URL pattern
-            matches = False
-            if trigger.url_contains and trigger.url_contains.lower() in url.lower():
-                matches = True
-            elif trigger.url_pattern and re.search(trigger.url_pattern, url):
-                matches = True
+            logger.info(f"Request trigger matched: {event.url}")
+            fired_event.set()
+            await self._run_single_action(action)
 
-            if matches:
-                if trigger.wait_for_load:
-                    # Mark URL as matched, wait for page load
-                    url_matched["value"] = True
-                else:
-                    # Fire immediately
-                    fired_event.set()
-                    asyncio.create_task(self._run_single_action(action))
+        # Use EventSource if available, otherwise we'll need CDP via attach_to_browser
+        if self.event_source:
+            handler_id = self.event_source.on_request(
+                pattern,
+                on_request_match,
+                wait_for_response=trigger.wait_for_load,
+            )
+            self._handler_ids.append(handler_id)
+            logger.debug(f"Registered proxy-based request trigger for pattern: {pattern}")
 
-        def on_page_load(params, session_id):
-            """Handle Page.loadEventFired CDP events."""
-            if url_matched["value"] and not fired_event.is_set():
-                fired_event.set()
-                asyncio.create_task(self._run_single_action(action))
+            # Set up timeout task
+            async def timeout_watcher():
+                try:
+                    await asyncio.wait_for(fired_event.wait(), timeout=trigger.timeout)
+                except asyncio.TimeoutError:
+                    logger.debug(f"Request trigger timed out for pattern: {pattern}")
 
-        try:
-            cdp_session = await browser.get_or_create_cdp_session()
-            await cdp_session.cdp_client.send_raw("Network.enable", session_id=cdp_session.session_id)
-            cdp_session.cdp_client._event_registry.register("Network.requestWillBeSent", on_network_request)
+            task = asyncio.create_task(timeout_watcher())
+            self.active_tasks.append(task)
+        else:
+            # No event source - will need to use CDP when browser is attached
+            logger.debug(f"No EventSource, request trigger will use CDP: {pattern}")
 
-            # If wait_for_load, also listen for page load event
-            if trigger.wait_for_load:
-                await cdp_session.cdp_client.send_raw("Page.enable", session_id=cdp_session.session_id)
-                cdp_session.cdp_client._event_registry.register("Page.loadEventFired", on_page_load)
-        except Exception:
-            return
-
-        # Set up timeout task
-        async def timeout_watcher():
-            try:
-                await asyncio.wait_for(fired_event.wait(), timeout=trigger.timeout)
-            except asyncio.TimeoutError:
-                pass
-
-        task = asyncio.create_task(timeout_watcher())
-        self.active_tasks.append(task)
 
     async def _setup_poll_trigger(self, action: ActionPayload, action_id: str):
         """Poll an endpoint until condition is met."""
@@ -235,20 +258,20 @@ class SceneManager:
                     # Check if condition is met
                     if trigger.poll_contains:
                         if trigger.poll_contains.lower() in text.lower():
-                            print(f"🎯 Poll trigger matched: found '{trigger.poll_contains}' at {trigger.poll_endpoint}")
+                            print(f"Poll trigger matched: found '{trigger.poll_contains}' at {trigger.poll_endpoint}")
                             fired_event.set()
                             await self._run_single_action(action)
                             return
                     else:
                         # No condition = just check for 200 OK
                         if response.status_code == 200:
-                            print(f"🎯 Poll trigger matched: 200 OK from {trigger.poll_endpoint}")
+                            print(f"Poll trigger matched: 200 OK from {trigger.poll_endpoint}")
                             fired_event.set()
                             await self._run_single_action(action)
                             return
 
                 except Exception as e:
-                    pass  # Keep polling
+                    logger.debug(f"Poll attempt failed: {e}")  # Keep polling
 
                 await asyncio.sleep(trigger.poll_interval)
                 elapsed += trigger.poll_interval
@@ -338,9 +361,9 @@ class SceneManager:
             return True
 
         elif trigger.trigger_type == "request":
-            # Request triggers are handled via CDP listeners
+            # Request triggers are handled via EventSource or CDP listeners
             # This method is mainly for agent start triggers
-            print(f"Warning: request triggers should use attach_to_page()")
+            logger.warning("Request triggers should use setup_triggers() or attach_to_browser()")
             return True
 
         return False
@@ -411,10 +434,22 @@ class SceneManager:
             })
 
     async def cleanup(self):
-        """Cancel all active trigger tasks."""
+        """Cancel all active trigger tasks and clean up resources."""
+        # Cancel active tasks
         for task in self.active_tasks:
             if not task.done():
                 task.cancel()
         self.active_tasks.clear()
         self._trigger_events.clear()
         self._browsers.clear()
+
+        # Clean up EventSource handlers
+        if self.event_source:
+            for handler_id in self._handler_ids:
+                self.event_source.remove_handler(handler_id)
+            self._handler_ids.clear()
+
+            # Stop EventSource if we started it
+            if self._event_source_started:
+                await self.event_source.stop()
+                self._event_source_started = False

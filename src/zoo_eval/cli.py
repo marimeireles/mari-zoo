@@ -80,6 +80,8 @@ def run(
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
     db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
+    use_proxy_events: bool = typer.Option(False, "--use-proxy-events", help="Use Redis pub/sub for scene triggers (harness-agnostic)"),
+    redis_url: str = typer.Option("redis://localhost:6379", "--redis-url", help="Redis URL for proxy events"),
 ):
     """Run evaluation tasks from a universe directory."""
     # Validate harness
@@ -225,6 +227,8 @@ def run(
         completed_pairs=completed_pairs,
         harness=harness_enum,
         claude_model=claude_model,
+        use_proxy_events=use_proxy_events,
+        redis_url=redis_url,
     )
     runner = TaskRunner(zoo, run_config, universe_path, universe_obj)
 

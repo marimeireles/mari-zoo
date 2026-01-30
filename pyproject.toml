@@ -25,6 +25,9 @@ dev = [
 claude = [
     "claude-agent-sdk>=0.1.22",
 ]
+proxy-events = [
+    "redis[hiredis]>=5.0",  # Async Redis with fast parser for proxy-based triggers
+]
 
 [project.scripts]
 zoo-eval = "zoo_eval.cli:app"
