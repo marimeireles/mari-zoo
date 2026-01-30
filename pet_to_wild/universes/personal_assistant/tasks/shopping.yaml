@@ -4,10 +4,9 @@ tasks:
     - postmill.zoo
     - onestopshop.zoo
   intent: "Research and purchase a vacuum cleaner based on community recommendations"
-  start_url: "https://postmill.zoo"
+  start_url: "http://postmill.zoo"
   compatible_universes:
     - personal_assistant
-  require_reset: true
   scene: vacuum_shopping
   complexity: compositional
   environment: domesticated

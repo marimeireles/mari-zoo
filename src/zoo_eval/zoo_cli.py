@@ -525,11 +525,23 @@ class PostmillSession:
     """
 
     def __init__(self, username: str, password: str):
+        import httpx
+
         self.username = username
         self.password = password
-        self._cookies: dict[str, str] = {}
         self._csrf_token: str | None = None
         self._logged_in = False
+
+        proxy_port = _get_proxy_port()
+        proxy_url = f"http://localhost:{proxy_port}"
+
+        # Persistent client that maintains cookies across requests
+        self._client = httpx.Client(
+            proxy=proxy_url,
+            verify=False,
+            timeout=30.0,
+            follow_redirects=True,
+        )
 
     def _request(
         self,
@@ -539,47 +551,41 @@ class PostmillSession:
         json_body: dict | None = None,
     ) -> Any:
         """Make a request to Postmill."""
-        import httpx
+        url = f"http://postmill.zoo{endpoint}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Zoo Seed Script)",
+        }
 
-        proxy_port = _get_proxy_port()
-        proxy_url = f"http://localhost:{proxy_port}"
+        if method == "POST" and self._csrf_token:
+            if data is None:
+                data = {}
+            data["_csrf_token"] = self._csrf_token
 
-        with httpx.Client(proxy=proxy_url, verify=False, timeout=30.0, follow_redirects=True) as client:
-            url = f"http://postmill.zoo{endpoint}"
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Zoo Seed Script)",
-            }
+        response = self._client.request(
+            method=method,
+            url=url,
+            headers=headers,
+            data=data,
+            json=json_body,
+        )
 
-            if self._cookies:
-                headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
+        return response
 
-            if method == "POST" and self._csrf_token:
-                if data is None:
-                    data = {}
-                data["_token"] = self._csrf_token
-
-            response = client.request(
-                method=method,
-                url=url,
-                headers=headers,
-                data=data,
-                json=json_body,
-            )
-
-            # Store any cookies from response
-            for cookie in response.cookies.jar:
-                self._cookies[cookie.name] = cookie.value
-
-            return response
+    def close(self):
+        """Close the HTTP client."""
+        self._client.close()
 
     def _extract_csrf_token(self, html: str) -> str | None:
         """Extract CSRF token from HTML page."""
         import re
-        # Look for hidden input with name="_token" or "csrf_token"
-        match = re.search(r'name=["\']_token["\'][^>]*value=["\']([^"\']+)["\']', html)
+        # Look for hidden input with name="_csrf_token" or "_token"
+        match = re.search(r'name=["\']_csrf_token["\'][^>]*value=["\']([^"\']+)["\']', html)
         if match:
             return match.group(1)
-        match = re.search(r'value=["\']([^"\']+)["\'][^>]*name=["\']_token["\']', html)
+        match = re.search(r'value=["\']([^"\']+)["\'][^>]*name=["\']_csrf_token["\']', html)
+        if match:
+            return match.group(1)
+        match = re.search(r'name=["\']_token["\'][^>]*value=["\']([^"\']+)["\']', html)
         if match:
             return match.group(1)
         return None
@@ -595,9 +601,9 @@ class PostmillSession:
         if not self._csrf_token:
             raise RuntimeError("Could not find CSRF token on login page")
 
-        # Submit login form
+        # Submit login form to /login_check endpoint
         response = self._request(
-            "/login",
+            "/login_check",
             method="POST",
             data={
                 "_username": self.username,
@@ -607,7 +613,7 @@ class PostmillSession:
         )
 
         # Check if login succeeded (should redirect to home or show username)
-        self._logged_in = self.username.lower() in response.text.lower() or response.status_code == 200
+        self._logged_in = self.username.lower() in response.text.lower()
         return self._logged_in
 
     def get_submissions(self, forum: str = "all", sort: str = "new", limit: int = 25) -> list[dict]:
