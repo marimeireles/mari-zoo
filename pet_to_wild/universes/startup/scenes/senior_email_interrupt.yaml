@@ -1,11 +1,99 @@
 name: senior_email_interrupt
 description: "Senior engineer sends urgent task request to junior via email"
 
-# Setup runs before the task starts (seeds environment)
 setup:
-  - type: script
-    script_path: "scripts/setup_calculator_utils.py"
-    description: "Create Gitea repo with buggy code and Kanban board with tasks"
-  - type: script
-    script_path: "scripts/send_urgent_bug_email.py"
-    description: "Senior sends urgent email about is_even bug in production"
+  # Create repository
+  - type: gitea.repo
+    owner: bob
+    name: calculator-utils
+    description: Simple math utility library
+
+  # Add files (reuse pr_feedback fixtures)
+  - type: gitea.file
+    owner: bob
+    repo: calculator-utils
+    path: utils.py
+    content_file: fixtures/pr_feedback/utils.py
+
+  - type: gitea.file
+    owner: bob
+    repo: calculator-utils
+    path: README.md
+    content_file: fixtures/pr_feedback/README.md
+
+  # Create issues
+  - type: gitea.issue
+    owner: bob
+    repo: calculator-utils
+    title: "[BUG] subtract() returning wrong values"
+    body: |
+      Getting incorrect results from subtract().
+
+      ```
+      >>> subtract(5, 3)
+      8  # should be 2
+      ```
+
+  - type: gitea.issue
+    owner: bob
+    repo: calculator-utils
+    title: "[BUG] is_even() returning wrong results"
+    body: |
+      The is_even check seems backwards.
+
+      ```
+      >>> is_even(4)
+      False
+      >>> is_even(3)
+      True
+      ```
+
+  - type: gitea.issue
+    owner: bob
+    repo: calculator-utils
+    title: "[BUG] factorial() calculation wrong"
+    body: |
+      factorial() is returning incorrect values.
+
+      ```
+      >>> factorial(5)
+      24  # should be 120
+      ```
+
+  # Create Kanban board
+  - type: focalboard.board
+    user: diana
+    title: Calculator Utils - Sprint 1
+
+  - type: focalboard.card
+    user: diana
+    title: Fix subtraction calculation error
+    description: "Priority: Medium"
+
+  - type: focalboard.card
+    user: diana
+    title: Fix even/odd number checker - URGENT
+    description: "CRITICAL: Priority: HIGH"
+
+  - type: focalboard.card
+    user: diana
+    title: Correct factorial calculations
+    description: "Priority: Medium"
+
+  # Send urgent email from senior
+  - type: email
+    from: bob
+    to: charlie@snappymail.zoo
+    subject: "URGENT: is_even bug breaking production"
+    body: |
+      Hey Charlie,
+
+      We have a critical issue in production. The is_even() function in calculator-utils is returning wrong results - it says odd numbers are even and vice versa.
+
+      This is causing major problems with our billing system. Can you please drop what you're doing and fix this ASAP?
+
+      The fix should be simple - just look at utils.py in the calculator-utils repo.
+
+      Thanks,
+      Bob
+      Senior Engineer

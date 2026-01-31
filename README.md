@@ -11,12 +11,10 @@ uv sync
 # Install playwright browsers
 uv run playwright install chromium
 
-# Set API keys
-export OPENROUTER_API_KEY=your-key    # Required (default uses Gemini 2.5 Flash)
-export OPENAI_API_KEY=your-key        # Required for LLM judge evaluation
-
-# Optional: Override LLM judge model (default: gpt-5)
-export OPENAI_JUDGE_MODEL=gpt-4o
+# Set API keys (based on which models you use)
+export OPENROUTER_API_KEY=your-key    # Default model uses Gemini 2.5 Flash via OpenRouter
+export OPENAI_API_KEY=your-key        # Required for LLM judge (default: gpt-4o)
+export ANTHROPIC_API_KEY=your-key     # For Claude models via Anthropic API
 ```
 
 ## Quick Start
@@ -44,12 +42,36 @@ uv run zoo-eval run startup --task email --id 101 --id 102
 # Run all tasks in a task file
 uv run zoo-eval run startup --task email
 
-# Use a different agent model
+# Use a different agent model (see Models section below)
 uv run zoo-eval run startup --task email --id 101 --model gpt-4o
-uv run zoo-eval run startup --task email --id 101 --model claude
+uv run zoo-eval run startup --task email --id 101 --model sonnet
 
 # Use a different LLM judge model (for evaluation)
 uv run zoo-eval run startup --task email --id 101 --judge-model gpt-4o
+```
+
+## Models
+
+Provider is auto-detected from model name:
+- `anthropic/...` → Anthropic API direct (requires `ANTHROPIC_API_KEY`)
+- `provider/model` → OpenRouter (requires `OPENROUTER_API_KEY`)
+- No slash (e.g., `gpt-4o`) → OpenAI direct (requires `OPENAI_API_KEY`)
+
+**Aliases:** `flash`, `sonnet`, `opus`, `haiku`
+
+```bash
+# Claude via Anthropic API
+export ANTHROPIC_API_KEY=your-key
+uv run zoo-eval run startup --task email --id 101 --model anthropic/claude-sonnet-4
+uv run zoo-eval run startup --task email --id 101 --model sonnet  # alias
+
+# OpenRouter (any model)
+export OPENROUTER_API_KEY=your-key
+uv run zoo-eval run startup --task email --id 101 --model google/gemini-2.5-flash
+
+# OpenAI direct
+export OPENAI_API_KEY=your-key
+uv run zoo-eval run startup --task email --id 101 --model gpt-4o
 ```
 
 ## Autonomy Levels
@@ -72,6 +94,7 @@ uv run zoo-eval run startup --task email --resume
 ## Documentation
 
 - [Benchmark Guide](docs/benchmark_guide.md) - Full task and evaluation configuration
+- [Authoring Scenes](docs/authoring-scenes.md) - Writing scene YAML files with declarative actions
 - [Multi-Agent](docs/multi-agent.md) - Multi-agent evaluation details
 
 ## Reports

@@ -63,6 +63,7 @@ if config.harness == AgentHarness.YOUR_HARNESS:
 Your harness MUST:
 - Route all HTTP traffic through `zoo.config.proxy_url` (default: `http://localhost:3128`)
 - Handle SSL/TLS (zoo uses self-signed certs, use `verify=False` or equivalent)
+- Use `_build_agent_context(agent_config, task)` to include credentials and sensitive data in agent context
 
 ## API Reference
 

@@ -1,23 +1,105 @@
 name: pr_feedback
 description: "Junior submits PR, senior reviews and requests changes"
+requires_proxy: true
 
-# Setup runs before the task starts (seeds environment)
 setup:
-  - type: script
-    script_path: "scripts/setup_calculator_utils.py"
-    description: "Create Gitea repo with buggy code and issues"
+  # Create repository
+  - type: gitea.repo
+    owner: bob
+    name: calculator-utils
+    description: Simple math utility library
 
-# Actions with their own triggers
+  # Add files (content loaded from fixtures)
+  - type: gitea.file
+    owner: bob
+    repo: calculator-utils
+    path: utils.py
+    content_file: fixtures/pr_feedback/utils.py
+
+  - type: gitea.file
+    owner: bob
+    repo: calculator-utils
+    path: README.md
+    content_file: fixtures/pr_feedback/README.md
+
+  # Create issues
+  - type: gitea.issue
+    owner: bob
+    repo: calculator-utils
+    title: "[BUG] subtract() returning wrong values"
+    body: |
+      Getting incorrect results from subtract(). Looks like the math is off.
+
+      ```
+      >>> subtract(5, 3)
+      8  # should be 2
+      ```
+
+      Can someone take a look at utils.py?
+
+  - type: gitea.issue
+    owner: bob
+    repo: calculator-utils
+    title: "[BUG] is_even() returning wrong results"
+    body: |
+      The is_even check seems backwards. Even numbers return False, odd numbers return True.
+
+      ```
+      >>> is_even(4)
+      False
+      >>> is_even(3)
+      True
+      ```
+
+  - type: gitea.issue
+    owner: bob
+    repo: calculator-utils
+    title: "[BUG] factorial() calculation wrong"
+    body: |
+      factorial() is returning incorrect values.
+
+      ```
+      >>> factorial(5)
+      24  # should be 120
+      ```
+
+  # Create Kanban board
+  - type: focalboard.board
+    user: diana
+    title: Calculator Utils - Sprint 1
+
+  - type: focalboard.card
+    user: diana
+    title: Fix subtraction calculation error
+    description: "Users report that subtraction gives wrong results. Priority: Medium."
+
+  - type: focalboard.card
+    user: diana
+    title: Fix even/odd number checker - URGENT
+    description: "CRITICAL: The even number check is inverted. Priority: HIGH."
+
 actions:
   - trigger:
       type: request
       url_contains: "/pulls"
       method: POST
-    type: script
-    script_path: "scripts/send_pr_feedback_email.py"
-    description: "Senior sends email asking for input validation"
+    type: email
+    from: bob
+    to: alice@snappymail.zoo
+    subject: "Re: PR for calculator-utils"
+    description: "Senior sends feedback email"
+    body: |
+      Hey Alice,
 
-# Agents spawned by triggers
+      Thanks for the PR! The fixes look good but we should also add input validation
+      to handle edge cases. Can you add checks for:
+      - Division by zero in divide()
+      - Negative numbers in factorial()
+
+      Let me know if you have questions.
+
+      Bob
+
 agents:
   - trigger:
       type: request

@@ -3,7 +3,7 @@
 Auto-detects provider based on model name:
 - Models starting with "anthropic/" → Anthropic API direct
 - Models with "/" (e.g., "google/gemini-2.5-flash") → OpenRouter
-- Models without "/" (e.g., "gpt-4o") → OpenAI direct
+- Models without "/" (e.g., "gpt-5.1") → OpenAI direct
 
 Aliases are supported for convenience:
 - "flash" → "google/gemini-2.5-flash"

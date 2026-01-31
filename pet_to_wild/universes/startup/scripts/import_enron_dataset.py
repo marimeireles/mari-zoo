@@ -11,6 +11,7 @@ from pathlib import Path
 
 import kagglehub
 
+from zoo_eval.auth import get_credential
 from zoo_eval.zoo_cli import SeedTracker, send_email
 
 
@@ -48,6 +49,7 @@ def seed_emails_from_csv(
         Number of emails successfully sent
     """
     sent_count = 0
+    cred = get_credential("snappymail", "blake.sullivan")
 
     with open(csv_path, 'r', encoding='utf-8', errors='ignore') as f:
         reader = csv.DictReader(f)
@@ -79,11 +81,11 @@ def seed_emails_from_csv(
 
             with tracker.track("email", "emails"):
                 send_email(
-                    from_addr="enron-archive@snappymail.zoo",
+                    from_addr=cred.username,
                     to_addr=recipient,
                     subject=f"[Enron Archive] {subject}",
                     body=f"Original sender: {from_addr}\n\n{body}",
-                    password="Password.123",
+                    password=cred.password,
                 )
                 sent_count += 1
 

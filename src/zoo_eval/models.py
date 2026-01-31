@@ -33,7 +33,7 @@ class RunConfig:
     save_traces: bool = True
     trace_dir: str = "./traces"
     model: str = "google/gemini-2.5-flash-lite"  # Model for agent (auto-detects provider)
-    judge_model: str = "gpt-4o"  # Model for LLM judge evaluation (auto-detects provider)
+    judge_model: str = "gpt-5.1"  # Model for LLM judge evaluation (auto-detects provider)
     shared_browser: bool = False  # If True, all agents share the same browser and memory
     autonomy_levels: list[str] = field(default_factory=lambda: list(AUTONOMY_LEVELS))  # Which levels to run
     completed_pairs: set[tuple[int, str]] = field(default_factory=set)  # (task_id, level) pairs to skip (for resume)
@@ -224,28 +224,30 @@ class Trigger:
 
 @dataclass
 class ActionPayload:
-    """Action that runs as part of a scene.
+    """Action that runs as part of a scene. See docs/authoring-scenes.md for action types."""
 
-    Actions are scripts or commands that execute during a scene. They can run:
-    - In setup: before the task starts (e.g., seeding a database, creating repos)
-    - On triggers: during task execution when conditions are met (e.g., sending an email)
-    """
-
-    action_type: str  # "script"
-    script_path: str = ""  # Path to Python script to execute
-    description: str = ""  # Optional description of the action
-    trigger: Trigger | None = None  # When this action should run
+    action_type: str  # "script", "email", "gitea.repo", etc.
+    data: dict = field(default_factory=dict)  # Action-specific fields
+    description: str = ""
+    trigger: Trigger | None = None
+    script_path: str = ""  # Legacy: for script actions
 
     @classmethod
     def from_dict(cls, data: dict) -> ActionPayload:
         trigger = None
         if data.get("trigger"):
             trigger = Trigger.from_dict(data["trigger"])
+
+        action_type = data.get("type", "script")
+        known_fields = {"type", "trigger", "script_path"}
+        action_data = {k: v for k, v in data.items() if k not in known_fields}
+
         return cls(
-            action_type=data.get("type", "script"),
-            script_path=data.get("script_path", ""),
+            action_type=action_type,
+            data=action_data,
             description=data.get("description", ""),
             trigger=trigger,
+            script_path=data.get("script_path", ""),
         )
 
 
@@ -276,9 +278,20 @@ class Scene:
 
     name: str
     description: str = ""
+    requires_proxy: bool = False  # Explicitly declare if scene needs proxy events
     setup: list[ActionPayload] = field(default_factory=list)
     actions: list[ActionPayload] = field(default_factory=list)
     agents: list[AgentTrigger] = field(default_factory=list)
+
+    @property
+    def needs_proxy_events(self) -> bool:
+        """Check if this scene needs proxy infrastructure (explicit or from request triggers)."""
+        if self.requires_proxy:
+            return True
+        for action in self.actions:
+            if action.trigger and action.trigger.trigger_type == "request":
+                return True
+        return False
 
     @classmethod
     def from_dict(cls, data: dict | None) -> Scene | None:
@@ -287,6 +300,7 @@ class Scene:
         return cls(
             name=data.get("name", ""),
             description=data.get("description", ""),
+            requires_proxy=data.get("requires_proxy", False),
             setup=[ActionPayload.from_dict(s) for s in data.get("setup", [])],
             actions=[ActionPayload.from_dict(a) for a in data.get("actions", [])],
             agents=[AgentTrigger.from_dict(ag) for ag in data.get("agents", [])],
@@ -435,6 +449,7 @@ class Task:
     complexity: TaskComplexity | None = None
     environment: Environment | None = None
     scene_name: str | None = None  # References scene file by name
+    sensitive_data: str | None = None  # Bait data for injection resistance testing
 
     def get_evaluation_for_level(self, autonomy_level: str) -> Evaluation:
         """Get the evaluation criteria for a specific autonomy level.
@@ -498,6 +513,7 @@ class Task:
             complexity=complexity,
             environment=environment,
             scene_name=data.get("scene"),
+            sensitive_data=data.get("sensitive_data"),
         )
 
 

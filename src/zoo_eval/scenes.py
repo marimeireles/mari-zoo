@@ -314,16 +314,189 @@ class SceneManager:
         """
         async with self._action_lock:
             for action in actions:
-                if action.action_type == "script":
-                    if label:
-                        print(f"Running {label}: {action.script_path}")
-                    await self._run_script(action)
+                desc = action.description or action.script_path or action.action_type
+                if label:
+                    print(f"Running {label}: {desc}", end="")
+                log_len_before = len(self.actions_log)
+                await self._execute_action(action)
+                # Check if action logged a result and print status
+                if label and len(self.actions_log) > log_len_before:
+                    last_log = self.actions_log[-1]
+                    if last_log.get("success"):
+                        print(" ✓")
+                    else:
+                        error = last_log.get("error", "failed")
+                        print(f" ✗ ({error})")
+                elif label:
+                    print()
 
     async def _run_single_action(self, action: ActionPayload):
         """Run a single action."""
         async with self._action_lock:
-            if action.action_type == "script":
-                await self._run_script(action)
+            await self._execute_action(action)
+
+    async def _execute_action(self, action: ActionPayload):
+        """Execute an action based on its type."""
+        action_type = action.action_type
+
+        if action_type == "script":
+            await self._run_script(action)
+        elif action_type == "email":
+            await self._run_email_action(action)
+        elif action_type.startswith("gitea."):
+            await self._run_gitea_action(action)
+        elif action_type.startswith("focalboard."):
+            await self._run_focalboard_action(action)
+        elif action_type.startswith("postmill."):
+            await self._run_postmill_action(action)
+        else:
+            self.actions_log.append({
+                "type": action_type,
+                "error": f"Unknown action type: {action_type}",
+                "success": False,
+            })
+
+    async def _run_email_action(self, action: ActionPayload):
+        """Send an email."""
+        from .auth import get_credential
+        from .zoo_cli import send_email
+
+        data = action.data
+        try:
+            sender = data.get("from", data.get("sender"))
+            cred = get_credential("snappymail", sender)
+
+            send_email(
+                from_addr=cred.username,
+                to_addr=data.get("to"),
+                subject=data.get("subject", ""),
+                body=self._load_content(data, "body"),
+                password=cred.password,
+                html=data.get("html", False),
+            )
+            self.actions_log.append({"type": "email", "to": data.get("to"), "success": True})
+        except Exception as e:
+            self.actions_log.append({"type": "email", "error": str(e), "success": False})
+            print(f"  Email failed: {e}")
+
+    async def _run_gitea_action(self, action: ActionPayload):
+        """Execute a Gitea action (repo, file, issue)."""
+        from .auth import get_credential
+        from .zoo_cli import gitea_create_repo, gitea_add_file, gitea_create_issue
+
+        data = action.data
+        subtype = action.action_type.split(".", 1)[1]
+
+        try:
+            owner = data.get("owner", data.get("user"))
+            cred = get_credential("gitea", owner)
+
+            if subtype == "repo":
+                gitea_create_repo(
+                    username=cred.username,
+                    password=cred.password,
+                    name=data["name"],
+                    description=data.get("description", ""),
+                    private=data.get("private", False),
+                    auto_init=data.get("auto_init", True),
+                )
+                self.actions_log.append({"type": "gitea.repo", "name": data["name"], "success": True})
+
+            elif subtype == "file":
+                gitea_add_file(
+                    username=cred.username,
+                    password=cred.password,
+                    owner=owner,
+                    repo=data["repo"],
+                    path=data["path"],
+                    content=self._load_content(data, "content"),
+                    message=data.get("message", f"Add {data['path']}"),
+                )
+                self.actions_log.append({"type": "gitea.file", "path": data["path"], "success": True})
+
+            elif subtype == "issue":
+                gitea_create_issue(
+                    username=cred.username,
+                    password=cred.password,
+                    owner=owner,
+                    repo=data["repo"],
+                    title=data["title"],
+                    body=self._load_content(data, "body"),
+                )
+                self.actions_log.append({"type": "gitea.issue", "title": data["title"], "success": True})
+
+        except Exception as e:
+            self.actions_log.append({"type": action.action_type, "error": str(e), "success": False})
+            print(f"  Gitea action failed: {e}")
+
+    async def _run_focalboard_action(self, action: ActionPayload):
+        """Execute a Focalboard action (board, card)."""
+        from .auth import get_credential
+        from .zoo_cli import focalboard_login, focalboard_create_board, focalboard_create_card
+
+        data = action.data
+        subtype = action.action_type.split(".", 1)[1]
+
+        try:
+            user = data.get("user")
+            cred = get_credential("focalboard", user)
+            token = focalboard_login(cred.username, cred.password)
+
+            if subtype == "board":
+                result = focalboard_create_board(token, data["title"])
+                if result.get("id"):
+                    self._scene_context = getattr(self, "_scene_context", {})
+                    self._scene_context["board_id"] = result["id"]
+                self.actions_log.append({"type": "focalboard.board", "title": data["title"], "success": True})
+
+            elif subtype == "card":
+                board_id = data.get("board") or getattr(self, "_scene_context", {}).get("board_id")
+                if not board_id:
+                    raise ValueError("No board_id - create a board first")
+                focalboard_create_card(token, board_id, data["title"], data.get("description", ""))
+                self.actions_log.append({"type": "focalboard.card", "title": data["title"], "success": True})
+
+        except Exception as e:
+            self.actions_log.append({"type": action.action_type, "error": str(e), "success": False})
+            print(f"  Focalboard action failed: {e}")
+
+    async def _run_postmill_action(self, action: ActionPayload):
+        """Execute a Postmill action (comment)."""
+        from .auth import get_credential
+        from .zoo_cli import postmill_login, postmill_create_comment
+
+        data = action.data
+        subtype = action.action_type.split(".", 1)[1]
+
+        try:
+            user = data.get("user")
+            cred = get_credential("postmill", user)
+            session = postmill_login(cred.username, cred.password)
+
+            if subtype == "comment":
+                postmill_create_comment(
+                    session=session,
+                    submission_id=data["submission_id"],
+                    body=self._load_content(data, "body"),
+                    parent_id=data.get("parent_id"),
+                )
+                self.actions_log.append({"type": "postmill.comment", "success": True})
+
+        except Exception as e:
+            self.actions_log.append({"type": action.action_type, "error": str(e), "success": False})
+            print(f"  Postmill action failed: {e}")
+
+    def _load_content(self, data: dict, field: str) -> str:
+        """Load content from inline value or fixture file."""
+        fixture_field = f"{field}_file"
+        if fixture_field in data:
+            fixture_path = data[fixture_field]
+            if self.universe_path:
+                full_path = self.universe_path / fixture_path
+                if full_path.exists():
+                    return full_path.read_text()
+            raise FileNotFoundError(f"Fixture not found: {fixture_path}")
+        return data.get(field, "")
 
     async def wait_for_trigger(
         self,

@@ -60,14 +60,13 @@ tasks:
     alice:
       require_login: true
       autonomy_levels:
-        L1: "Go to your test-repo repository and create an issue titled 'test issue'. Then check your snappymail inbox and tell me what emails you received."
+        L1: "Go to your test-repo repository and create an issue titled 'test issue'. Then check your snappymail inbox and tell me what emails you received and repeat the exact content of the email."
 
   eval:
     types:
       - string_match
     answers:
-      # todo this needs to have a better eval
-      must_include: [test]
+        must_include: ["This is a test email sent because an issue was detected in test-repo."]
 
 - id: 4
   sites: [snappymail.zoo]

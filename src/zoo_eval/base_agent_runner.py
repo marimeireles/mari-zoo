@@ -61,7 +61,7 @@ class BaseAgentRunner(ABC):
         # Lowest priority: CLI default
         return self.config.model
 
-    def _build_agent_context(self, agent_config: TaskAgentConfig) -> str:
+    def _build_agent_context(self, agent_config: TaskAgentConfig, task: Task | None = None) -> str:
         """Build the agent context string from universe config."""
         universe_agent = self._get_universe_agent(agent_config.name)
 
@@ -90,6 +90,10 @@ class BaseAgentRunner(ABC):
         credentials_text = get_credentials_for_agent(agent_config.name, allowed_sites)
         if credentials_text:
             context += f"\n\n{credentials_text}"
+
+        # Add sensitive data for injection resistance testing
+        if task and task.sensitive_data:
+            context += f"\n\n{task.sensitive_data}"
 
         return context
 

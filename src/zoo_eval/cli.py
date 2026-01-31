@@ -11,6 +11,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from .benchmark import BenchmarkConfig, run_benchmark
 from .models import AUTONOMY_LEVELS, AgentHarness, RunConfig, load_tasks, load_universe
 from .results import ResultsDB, print_report
 from .runner import TaskRunner
@@ -72,15 +73,15 @@ def run(
     max_steps: int = typer.Option(30, help="Max steps per task"),
     timeout: int = typer.Option(120, help="Timeout in seconds per task"),
     model: str = typer.Option("google/gemini-2.5-flash-lite", "--model", "-m", help="Agent model (auto-detects: '/' → OpenRouter, else OpenAI). Aliases: flash, sonnet"),
-    judge_model: str = typer.Option(None, "--judge-model", "-j", help="LLM judge model (default: gpt-4o, auto-detects provider like --model)"),
+    judge_model: str = typer.Option(None, "--judge-model", "-j", help="LLM judge model (default: gpt-5.1, auto-detects provider like --model)"),
     shared_browser: bool = typer.Option(False, "--shared-browser", help="All agents share same browser and memory"),
     level: list[str] = typer.Option(None, "--level", "-L", help="Autonomy level(s) to run: L0, L1, L2, L3 (can specify multiple, default: all)"),
-    harness: str = typer.Option("browser_use", "--harness", "-H", help="Agent harness: browser_use or claude_sdk"),
+    harness: str = typer.Option("browser_use", "--harness", "-H", help="Agent harness to use"),
     claude_model: str = typer.Option("sonnet", "--claude-model", help="Claude model for claude_sdk harness: opus, sonnet, haiku"),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
     db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
-    use_proxy_events: bool = typer.Option(False, "--use-proxy-events", help="Use Redis pub/sub for scene triggers (harness-agnostic)"),
+    use_proxy_events: bool = typer.Option(False, "--use-proxy-events", help="Force proxy events (auto-detected from scene request triggers)"),
     redis_url: str = typer.Option("redis://localhost:6379", "--redis-url", help="Redis URL for proxy events"),
 ):
     """Run evaluation tasks from a universe directory."""
@@ -221,7 +222,7 @@ def run(
         max_steps=max_steps,
         timeout_seconds=timeout,
         model=model,
-        judge_model=judge_model or "gpt-4o",
+        judge_model=judge_model or "gpt-5.1",
         shared_browser=shared_browser,
         autonomy_levels=autonomy_levels,
         completed_pairs=completed_pairs,
@@ -370,6 +371,207 @@ def mysql(
     else:
         console.print("Provide a query or use --list / --tables")
         raise typer.Exit(1)
+
+
+@app.command()
+def benchmark(
+    multi_model: bool = typer.Option(False, "--multi-model", "-M", help="Run multi-model (heterogeneous) tasks only"),
+    config_file: Path = typer.Option(None, "--config", "-c", help="YAML config file"),
+    model: str = typer.Option("google/gemini-2.5-flash-lite", "--model", "-m", help="Agent model"),
+    judge_model: str = typer.Option("gpt-5.1", "--judge-model", "-j", help="LLM judge model"),
+    harness: str = typer.Option("browser_use", "--harness", "-H", help="Agent harness to use"),
+    headless: bool = typer.Option(True, help="Run browser headlessly"),
+    max_steps: int = typer.Option(30, help="Max steps per task"),
+    timeout: int = typer.Option(120, help="Timeout in seconds per task"),
+    level: list[str] = typer.Option(None, "--level", "-L", help="Autonomy level(s): L0, L1, L2, L3"),
+    resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
+    proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
+):
+    """Run full benchmark suite across all universes and tasks.
+
+    By default runs all homogeneous (single-model) tasks.
+    Use --multi-model to run heterogeneous (multi-model) tasks instead.
+    """
+    # Load config from file or use CLI args
+    if config_file and config_file.exists():
+        config = BenchmarkConfig.from_yaml(config_file)
+    else:
+        config = BenchmarkConfig(
+            model=model,
+            judge_model=judge_model,
+            harness=harness,
+            headless=headless,
+            max_steps=max_steps,
+            timeout=timeout,
+            autonomy_levels=level if level else list(AUTONOMY_LEVELS),
+            proxy_port=proxy_port,
+        )
+
+    result = asyncio.run(run_benchmark(config, multi_model=multi_model, resume=resume))
+    if result is None:
+        raise typer.Exit(1)
+
+
+@app.command()
+def create_universe(
+    name: str = typer.Argument(..., help="Name of the new universe"),
+    path: Path = typer.Option(
+        None, "--path", "-p", help="Parent directory (default: pet_to_wild/universes)"
+    ),
+):
+    """Create scaffolding for a new universe."""
+    # Determine parent directory
+    if path is None:
+        parent = Path("pet_to_wild/universes")
+    else:
+        parent = Path(path)
+
+    if not parent.exists():
+        console.print(f"[red]Parent directory not found: {parent}[/red]")
+        raise typer.Exit(1)
+
+    universe_dir = parent / name
+    if universe_dir.exists():
+        console.print(f"[red]Universe already exists: {universe_dir}[/red]")
+        raise typer.Exit(1)
+
+    # Create directory structure
+    universe_dir.mkdir()
+    (universe_dir / "tasks").mkdir()
+    (universe_dir / "scenes").mkdir()
+    (universe_dir / "fixtures").mkdir()
+    (universe_dir / "scripts").mkdir()  # For complex logic only
+    (universe_dir / "custom_evaluators").mkdir()
+
+    # Create __init__.py for Python package
+    (universe_dir / "__init__.py").write_text("")
+
+    # Create config.yaml
+    config_content = f"""name: {name}
+sites:
+  - snappymail.zoo
+  # Add more sites as needed: gitea.zoo, focalboard.zoo, wiki.zoo, etc.
+
+services:
+  snappymail.zoo:
+    - stalwart
+    - snappymail-zoo
+  _core:
+    - proxy
+    - coredns
+    - caddy
+    - postgres
+    - mysql
+    - redis
+
+agents:
+  - role: user
+    name: agent
+    persona: ""
+    goal: ""
+"""
+    (universe_dir / "config.yaml").write_text(config_content)
+
+    # Create custom_evaluators/__init__.py
+    evaluators_init = '''"""Custom evaluation functions for this universe.
+
+Each function should:
+- Accept a TaskResult as its only parameter
+- Return an EvalResult
+
+Example:
+    from zoo_eval.evaluators import EvalResult
+    from zoo_eval.models import EvalType, TaskResult
+
+    def my_check(result: TaskResult) -> EvalResult:
+        if "expected" in result.page_content:
+            return EvalResult(passed=True, eval_type=EvalType.CUSTOM_FUNCTION, details="OK")
+        return EvalResult(passed=False, eval_type=EvalType.CUSTOM_FUNCTION, details="Failed")
+"""
+
+__all__ = []
+'''
+    (universe_dir / "custom_evaluators" / "__init__.py").write_text(evaluators_init)
+
+    # Create example task file
+    example_task = f"""# Example task file for {name} universe
+# See docs/benchmark_guide.md for full reference
+
+- id: 1
+  sites:
+    - snappymail.zoo
+  intent: "Example task description"
+  start_url: "https://snappymail.zoo"
+  compatible_universes:
+    - {name}
+  require_reset: false
+  complexity: atomic
+  environment: domesticated
+
+  agents:
+    agent:
+      require_login: true
+      autonomy_levels:
+        L0: "Step-by-step instructions"
+        L1: "Goal with method hint"
+        L2: "Goal only"
+
+  eval:
+    types:
+      - string_match
+    answers:
+      must_include:
+        - expected_string
+"""
+    (universe_dir / "tasks" / "example.yaml").write_text(example_task)
+
+    # Create example scene file
+    example_scene = f"""# Example scene for {name} universe
+# See docs/authoring-scenes.md for full reference
+
+name: example_scene
+description: "Example scene with email action"
+
+setup:
+  # Email action - credentials resolved from credentials/snappymail.zoo.yaml
+  - type: email
+    from: bob                    # Agent name from credentials file
+    to: alice@snappymail.zoo
+    subject: Test email
+    body: |
+      Hi Alice,
+      This is a test email from the example scene.
+      Best,
+      Bob
+
+  # For large content, use fixtures:
+  # - type: gitea.file
+  #   owner: bob
+  #   repo: my-repo
+  #   path: main.py
+  #   content_file: fixtures/example_scene/main.py
+
+# Triggered actions (run during task execution)
+# actions:
+#   - trigger:
+#       type: request
+#       url_contains: "gitea.zoo"
+#       method: POST
+#     type: email
+#     from: bob
+#     to: alice@snappymail.zoo
+#     subject: Action triggered!
+#     body: This email was sent when you made a POST to gitea.
+"""
+    (universe_dir / "scenes" / "example_scene.yaml").write_text(example_scene)
+
+    console.print(f"[green]Created universe: {universe_dir}[/green]")
+    console.print(f"  config.yaml        - Universe configuration")
+    console.print(f"  tasks/             - Task YAML files (example.yaml included)")
+    console.print(f"  scenes/            - Scene definitions (example_scene.yaml included)")
+    console.print(f"  fixtures/          - Content files for scenes")
+    console.print(f"  scripts/           - Complex logic scripts (use sparingly)")
+    console.print(f"  custom_evaluators/ - Custom evaluation functions")
 
 
 if __name__ == "__main__":

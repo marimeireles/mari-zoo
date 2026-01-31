@@ -86,8 +86,10 @@ class ClaudeSDKRunner(BaseAgentRunner):
         messages_log: list[Any] = []
 
         try:
-            # Build the prompt using shared method
-            prompt = self._build_full_task(agent_config, task, start_url, autonomy_level)
+            # Build the prompt using shared methods
+            agent_context = self._build_agent_context(agent_config, task)
+            task_prompt = self._build_full_task(agent_config, task, start_url, autonomy_level)
+            prompt = f"{agent_context}\n\n{task_prompt}"
             prompt += (
                 "\n\nUse the browser tools to complete this task. "
                 "When done, provide your final answer."
@@ -211,9 +213,17 @@ class ClaudeSDKRunner(BaseAgentRunner):
             # Activate scene once per task
             scene_manager = None
             if task.scene_name:
-                # Create event source if proxy events are enabled (only needed with scenes)
+                from .models import load_scene
+
+                # Load scene first to check if it needs proxy events
+                scenes_dir = self.universe_path / "scenes" if self.universe_path else None
+                scene_path = scenes_dir / f"{task.scene_name}.yaml" if scenes_dir else None
+                scene = load_scene(scene_path) if scene_path and scene_path.exists() else None
+
+                # Auto-enable proxy events if scene has request triggers
+                use_proxy = self.config.use_proxy_events or (scene and scene.needs_proxy_events)
                 event_source = None
-                if self.config.use_proxy_events:
+                if use_proxy:
                     from .proxy_event_source import ProxyEventSource
                     session_id = str(uuid.uuid4())
                     event_source = ProxyEventSource(
@@ -229,14 +239,11 @@ class ClaudeSDKRunner(BaseAgentRunner):
                     event_source=event_source,
                 )
 
-                if event_source:
-                    # Use new setup_triggers flow for proxy-based events
-                    await scene_manager.load_and_setup(task.scene_name)
-                    scene_manager.start_time = task_start_time
-                    await scene_manager.setup_triggers()
-                else:
-                    # Legacy flow for CDP-based triggers
-                    await scene_manager.load_and_activate_scene(task.scene_name, task_start_time)
+                await scene_manager.load_and_setup(task.scene_name)
+                scene_manager.start_time = task_start_time
+
+                # Set up triggers (poll, time, request, etc.)
+                await scene_manager.setup_triggers()
 
             try:
                 agents = list(task.agents.values())

@@ -121,7 +121,7 @@ The agent name matching is **case-insensitive** (e.g., `agent: Diana` matches `n
 ### Separate Browser Mode (Default)
 
 ```bash
-uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model gpt-4o
+uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model gpt-5.1
 ```
 
 - Each agent gets its own browser instance
@@ -132,7 +132,7 @@ uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yam
 ### Shared Browser Mode
 
 ```bash
-uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model gpt-4o --shared-browser
+uv run zoo-eval run configs/tasks.yaml --universe universes/startup_universe.yaml --model gpt-5.1 --shared-browser
 ```
 
 - All agents share **one browser instance**
@@ -166,15 +166,15 @@ Four agents collaborate on startup workflow tasks:
 
 Run 3 simple tasks:
 ```bash
-uv run zoo-eval run configs/test_simple.yaml --universe universes/startup_universe.yaml --model gpt-4o
+uv run zoo-eval run configs/test_simple.yaml --universe universes/startup_universe.yaml --model gpt-5.1
 ```
 
 Watch in browser (non-headless):
 ```bash
-uv run zoo-eval run configs/test_simple.yaml --universe universes/startup_universe.yaml --model gpt-4o --no-headless
+uv run zoo-eval run configs/test_simple.yaml --universe universes/startup_universe.yaml --model gpt-5.1 --no-headless
 ```
 
 Shared browser mode with shorter timeout:
 ```bash
-uv run zoo-eval run configs/test_simple.yaml --universe universes/startup_universe.yaml --model gpt-4o --shared-browser --timeout 60
+uv run zoo-eval run configs/test_simple.yaml --universe universes/startup_universe.yaml --model gpt-5.1 --shared-browser --timeout 60
 ```

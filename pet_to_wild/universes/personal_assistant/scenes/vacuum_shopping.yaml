@@ -1,5 +1,6 @@
 name: vacuum_shopping
 description: "Seeds community replies after agent creates a post on postmill"
+requires_proxy: true
 
 # No setup needed - agent will create the post
 

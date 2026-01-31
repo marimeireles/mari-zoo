@@ -71,34 +71,58 @@ def load_credentials(credentials_dir: Path | None = None) -> dict[str, SiteCrede
     return _credentials_cache
 
 
-def get_credentials_for_agent(
-    agent_name: str,
-    allowed_sites: list[str]
-) -> str:
-    """Get credentials as plain text for an agent to use.
+def get_credential(site: str, agent: str) -> Credential:
+    """Get credential for an agent on a site.
 
     Args:
-        agent_name: Universe agent name (e.g., "alice")
-        allowed_sites: List of site domains (e.g., ["gitea.zoo", "snappymail.zoo"])
+        site: Site name (e.g., "gitea.zoo" or "gitea")
+        agent: Agent name (e.g., "bob")
 
     Returns:
-        Human-readable credential instructions string
-    """
-    creds = load_credentials()
-    credential_lines = []
+        Credential object with username, password, etc.
 
+    Raises:
+        KeyError: If agent not found for site
+
+    Example:
+        >>> cred = get_credential("gitea", "bob")
+        >>> cred.password
+        'bob123'
+    """
+    # Normalize site name
+    if not site.endswith(".zoo"):
+        site = f"{site}.zoo"
+
+    creds = load_credentials()
+    site_creds = creds.get(site)
+    if not site_creds:
+        raise KeyError(f"Site '{site}' not found in credentials")
+
+    for cred in site_creds.users:
+        if cred.agent == agent:
+            return cred
+
+    raise KeyError(f"Agent '{agent}' not found for site '{site}'")
+
+
+def get_credentials_for_agent(agent_name: str, allowed_sites: list[str]) -> str:
+    """Get credentials as plain text for an agent prompt.
+
+    Args:
+        agent_name: Agent name (e.g., "alice")
+        allowed_sites: Sites to include (e.g., ["gitea.zoo", "snappymail.zoo"])
+
+    Returns:
+        Human-readable credential string for agent prompts
+    """
+    lines = []
     for site in allowed_sites:
-        site_creds = creds.get(site)
-        if not site_creds:
+        try:
+            cred = get_credential(site, agent_name)
+            lines.append(f"- {site}: username '{cred.username}', password '{cred.password}'")
+        except KeyError:
             continue
 
-        for cred in site_creds.users:
-            if cred.agent == agent_name:
-                credential_lines.append(
-                    f"- {site}: username '{cred.username}', password '{cred.password}'"
-                )
-                break
-
-    if credential_lines:
-        return "Your login credentials:\n" + "\n".join(credential_lines)
+    if lines:
+        return "Your login credentials:\n" + "\n".join(lines)
     return ""

@@ -288,10 +288,10 @@ class LLMJudgeEvaluator(Evaluator):
 
     Auto-detects provider based on model name:
     - Models with "/" (e.g., "google/gemini-2.5-flash") → OpenRouter
-    - Models without "/" (e.g., "gpt-4o") → OpenAI direct
+    - Models without "/" (e.g., "gpt-5.1") → OpenAI direct
     """
 
-    def __init__(self, judge_model: str = "gpt-4o"):
+    def __init__(self, judge_model: str = "gpt-5.1"):
         """Initialize with judge model.
 
         Args:
@@ -548,7 +548,7 @@ def get_evaluator(
     eval_type: EvalType,
     task=None,
     universe_name: str = "unknown",
-    judge_model: str = "gpt-4o",
+    judge_model: str = "gpt-5.1",
 ) -> Evaluator:
     """Get the appropriate evaluator for an eval type.
 
@@ -624,7 +624,7 @@ async def evaluate_task(
     evaluation: Evaluation,
     task=None,
     universe_name: str = "unknown",
-    judge_model: str = "gpt-4o",
+    judge_model: str = "gpt-5.1",
 ) -> list[SubtaskResult]:
     """Evaluate a task and return subtask results.
 
