@@ -40,7 +40,7 @@ class RunConfig:
     harness: AgentHarness = AgentHarness.BROWSER_USE  # Which agent harness to use
     claude_model: str = "sonnet"  # Claude model for Claude SDK harness ("opus", "sonnet", "haiku")
     # Proxy-based event source configuration (harness-agnostic scene triggers)
-    use_proxy_events: bool = False  # Use Redis pub/sub for scene triggers instead of CDP
+    use_proxy_events: bool = False  # Use Redis pub/sub for scene triggers (required for request triggers)
     redis_url: str = "redis://localhost:6379"  # Redis URL for proxy event source
 
 
@@ -173,7 +173,7 @@ class Trigger:
 
     Trigger types:
     - time: Activate after a delay (seconds)
-    - request: Activate when browser makes HTTP request matching pattern (via CDP)
+    - request: Activate when agent makes HTTP request matching pattern (via proxy events)
     - poll: Activate when a condition is met (checked periodically)
     - page_load: Activate immediately before agent starts
 

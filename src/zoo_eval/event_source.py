@@ -40,7 +40,7 @@ class EventSource(ABC):
     """Abstract base class for event sources.
 
     Event sources monitor HTTP traffic and dispatch events to registered handlers.
-    Different implementations can use different mechanisms (proxy, CDP, etc.)
+    Different implementations can use different mechanisms (proxy, websocket, etc.)
     while providing a unified interface.
     """
 

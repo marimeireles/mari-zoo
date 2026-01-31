@@ -21,31 +21,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Type alias - browser_use uses its own Page wrapper, not Playwright
-Page = object
 
 
 class SceneManager:
     """Manages scene activation and verification.
 
-    ## Generic API (works with any harness)
-
-    Use these methods for harness-agnostic scene management:
-
+    Usage:
         scene_manager = SceneManager(zoo, universe_path, event_source=my_event_source)
         await scene_manager.load_and_setup("scene_name")  # Runs setup scripts
         await scene_manager.setup_triggers()               # Sets up all triggers
         # ... run your agent ...
         await scene_manager.cleanup()
 
-    ## browser_use-specific API (legacy)
-
-    The attach_to_browser() method uses CDP and only works with browser_use:
-
-        scene_manager = SceneManager(zoo, universe_path)  # No event_source
-        await scene_manager.load_and_setup("scene_name")
-        # Later, when browser is ready:
-        await scene_manager.attach_to_browser(browser)    # browser_use only!
+    Note: Request triggers require an EventSource (e.g., ProxyEventSource).
     """
 
     def __init__(
@@ -61,8 +49,8 @@ class SceneManager:
             zoo: Zoo instance for environment access
             universe_path: Path to the universe directory
             universe_sites: List of sites in the universe
-            event_source: Optional EventSource for proxy-based triggers.
-                         If None, falls back to CDP when browser is attached.
+            event_source: EventSource for request triggers (e.g., ProxyEventSource).
+                         Required for scenes with request triggers.
         """
         self.zoo = zoo
         self.universe_path = universe_path
@@ -74,7 +62,6 @@ class SceneManager:
         self.actions_log: list[dict] = []  # Track all actions for verification
         self._action_lock = asyncio.Lock()  # Prevent concurrent action execution
         self._scene: Scene | None = None  # Current active scene
-        self._browsers: list = []  # Browser instances for CDP triggers
         self._trigger_events: dict[str, asyncio.Event] = {}  # Track fired triggers by action id
         self._handler_ids: list[str] = []  # Track EventSource handler IDs for cleanup
         self._event_source_started = False
@@ -108,8 +95,7 @@ class SceneManager:
     async def load_and_setup(self, scene_name: str) -> Scene:
         """Load a scene and run setup scripts.
 
-        This should be called BEFORE the browser is created.
-        Call attach_to_browser() after browser is ready to enable triggers.
+        Call setup_triggers() after this to activate triggers.
 
         Args:
             scene_name: Name of the scene file (without .yaml extension)
@@ -144,8 +130,8 @@ class SceneManager:
     async def setup_triggers(self) -> None:
         """Set up all triggers for the current scene.
 
-        This is the preferred method when using proxy-based event source.
-        For CDP-based triggers, use attach_to_browser() instead.
+        Call this after load_and_setup() to activate triggers.
+        Request triggers require an EventSource to be configured.
         """
         if self._scene is None:
             return
@@ -173,7 +159,7 @@ class SceneManager:
                 await self._run_single_action(action)
 
     async def _setup_request_trigger(self, action: ActionPayload, action_id: str) -> None:
-        """Set up a request trigger using EventSource (proxy) or CDP (fallback)."""
+        """Set up a request trigger using EventSource."""
         if not action.trigger:
             return
 
@@ -207,28 +193,27 @@ class SceneManager:
             fired_event.set()
             await self._run_single_action(action)
 
-        # Use EventSource if available, otherwise we'll need CDP via attach_to_browser
-        if self.event_source:
-            handler_id = self.event_source.on_request(
-                pattern,
-                on_request_match,
-                wait_for_response=trigger.wait_for_load,
-            )
-            self._handler_ids.append(handler_id)
-            logger.debug(f"Registered proxy-based request trigger for pattern: {pattern}")
+        if not self.event_source:
+            logger.warning(f"Request trigger requires EventSource (use --use-proxy-events): {pattern}")
+            return
 
-            # Set up timeout task
-            async def timeout_watcher():
-                try:
-                    await asyncio.wait_for(fired_event.wait(), timeout=trigger.timeout)
-                except asyncio.TimeoutError:
-                    logger.debug(f"Request trigger timed out for pattern: {pattern}")
+        handler_id = self.event_source.on_request(
+            pattern,
+            on_request_match,
+            wait_for_response=trigger.wait_for_load,
+        )
+        self._handler_ids.append(handler_id)
+        logger.debug(f"Registered request trigger for pattern: {pattern}")
 
-            task = asyncio.create_task(timeout_watcher())
-            self.active_tasks.append(task)
-        else:
-            # No event source - will need to use CDP when browser is attached
-            logger.debug(f"No EventSource, request trigger will use CDP: {pattern}")
+        # Set up timeout task
+        async def timeout_watcher():
+            try:
+                await asyncio.wait_for(fired_event.wait(), timeout=trigger.timeout)
+            except asyncio.TimeoutError:
+                logger.debug(f"Request trigger timed out for pattern: {pattern}")
+
+        task = asyncio.create_task(timeout_watcher())
+        self.active_tasks.append(task)
 
 
     async def _setup_poll_trigger(self, action: ActionPayload, action_id: str):
@@ -361,9 +346,8 @@ class SceneManager:
             return True
 
         elif trigger.trigger_type == "request":
-            # Request triggers are handled via EventSource or CDP listeners
-            # This method is mainly for agent start triggers
-            logger.warning("Request triggers should use setup_triggers() or attach_to_browser()")
+            # Request triggers are handled via EventSource in setup_triggers()
+            logger.warning("Request triggers should use setup_triggers()")
             return True
 
         return False
@@ -441,7 +425,6 @@ class SceneManager:
                 task.cancel()
         self.active_tasks.clear()
         self._trigger_events.clear()
-        self._browsers.clear()
 
         # Clean up EventSource handlers
         if self.event_source:
