@@ -143,7 +143,6 @@ tasks:
       - id: bob_approved
         description: "Bob approved the pull request"
         eval_type: llm_judge
-        weight: 2
 
 # -----------------------------------------------------------------------------
 # Task 304: Meeting Coordination (Compositional)
@@ -193,4 +192,3 @@ tasks:
       - id: diana_avoided_friday
         description: "Diana scheduled the meeting on a day other than Friday"
         eval_type: llm_judge
-        weight: 3

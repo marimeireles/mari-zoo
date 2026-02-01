@@ -369,10 +369,10 @@ class AgentConfig:
     @classmethod
     def from_dict(cls, data: dict) -> AgentConfig:
         return cls(
-            role=data["role"],
-            name=data["name"],
-            persona=data["persona"],
-            goal=data["goal"],
+            role=data.get("role", "agent"),
+            name=data.get("name", "unnamed"),
+            persona=data.get("persona", ""),
+            goal=data.get("goal", ""),
             model=data.get("model"),
         )
 
@@ -412,7 +412,14 @@ class Universe:
     @classmethod
     def from_dict(cls, data: dict) -> Universe:
         agents_data = data.get("agents", [])
-        agents = [AgentConfig.from_dict(a) for a in agents_data]
+        # Handle both list and dict formats for agents
+        if isinstance(agents_data, dict):
+            agents = [
+                AgentConfig.from_dict({"name": name, **agent_data})
+                for name, agent_data in agents_data.items()
+            ]
+        else:
+            agents = [AgentConfig.from_dict(a) for a in agents_data]
 
         return cls(
             name=data["name"],

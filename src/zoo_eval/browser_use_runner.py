@@ -9,13 +9,12 @@ For harness-agnostic code, see base_agent_runner.py and event_source.py.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 import uuid
 from pathlib import Path
 from typing import Any
-
-from browser_use.agent.views import AgentSettings
 
 from .base_agent_runner import BaseAgentRunner
 from .models import AgentResult, RunConfig, Task, TaskAgentConfig, TaskResult, Universe
@@ -149,7 +148,7 @@ class BrowserUseRunner(BaseAgentRunner):
                 llm=self._get_llm(agent_config),
                 browser=browser,
                 extend_system_message=agent_context,
-                settings=AgentSettings(use_judge=False),
+                use_judge=False,
             )
 
             step_hook, last_page_html = _create_step_hook(browser)
@@ -232,7 +231,7 @@ class BrowserUseRunner(BaseAgentRunner):
                         llm=self._get_llm(agent_config),
                         browser=browser,
                         extend_system_message=agent_context,
-                        settings=AgentSettings(use_judge=False),
+                        use_judge=False,
                     )
 
                     step_hook, last_page_html = _create_step_hook(browser)

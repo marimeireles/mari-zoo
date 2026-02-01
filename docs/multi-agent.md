@@ -56,65 +56,21 @@ agents:
 
 ## Task Configuration
 
-Tasks specify their intent, which agent runs them, and compatible universes:
+Tasks define agents in the `agents:` section. See [Task Reference](task_reference.md) for full task structure.
 
 ```yaml
 tasks:
-- id: 1
-  agent: alice  # Required: which agent runs this task
-  intent: Tell me what the main heading says
-  start_url: https://home.zoo
-  compatible_universes:
-    - startup_universe
-  require_login: false
-  require_reset: false
-  eval:
-    types:
-    - string_match
-    answers:
-      must_include:
-      - home
-
-- id: 2
-  agent: bob  # This task runs as Bob
-  intent: Navigate to https://auth.zoo and tell me what you see
-  start_url: https://home.zoo
-  compatible_universes:
-    - startup_universe
-
-- id: 3
-  agent: diana  # This task runs as Diana
-  intent: Send an email to the team
-  start_url: https://snappymail.zoo
-  compatible_universes:
-    - startup_universe
-  require_login: true
-  username: diana@snappymail.zoo
-  password: diana123
-```
-
-## Task Assignment
-
-Each task must specify an `agent` field that matches an agent's `name` from the universe config:
-
-```yaml
-# In task file:
 - id: 103
-  agent: diana  # Matches agent name in universe
-
-# In universe config:
-agents:
-  - role: pm
-    name: diana  # This agent will run task 103
-    persona: Product manager
+  agents:
+    diana:
+      require_login: true
+      autonomy_levels:
+        L0: "1. Send email to team..."
+        L1: "Send an email to the team"
+        L2: "You work at a startup as a product manager."
 ```
 
-The agent name matching is **case-insensitive** (e.g., `agent: Diana` matches `name: diana`).
-
-### Validation
-
-- Tasks without an `agent` field will print an error and be skipped
-- Tasks with an unknown agent name will print an error and be skipped
+Agent names must match entries in the universe config and `credentials/*.zoo.yaml`.
 
 ## Execution Modes
 
@@ -152,7 +108,7 @@ Task success requires all assigned agents to succeed.
 
 ## Default Universes
 
-### startup_universe
+### startup
 
 Four agents collaborate on startup workflow tasks:
 - **alice** (cofounder): Triage inbound emails
@@ -160,21 +116,11 @@ Four agents collaborate on startup workflow tasks:
 - **charlie** (junior_engineer): Fix bugs from kanban board
 - **diana** (pm): Update project board
 
-**Sites:** mail, kanban, gitea, wiki
+**Sites:** snappymail, focalboard, gitea
 
-## Usage Examples
+### personal_assistant
 
-Run 3 simple tasks:
-```bash
-uv run zoo-eval run configs/test_simple.yaml --universe universes/startup_universe.yaml --model gpt-5.1
-```
+Single agent for personal task assistance:
+- **emma.lopez**: Personal shopping and research assistant
 
-Watch in browser (non-headless):
-```bash
-uv run zoo-eval run configs/test_simple.yaml --universe universes/startup_universe.yaml --model gpt-5.1 --no-headless
-```
-
-Shared browser mode with shorter timeout:
-```bash
-uv run zoo-eval run configs/test_simple.yaml --universe universes/startup_universe.yaml --model gpt-5.1 --shared-browser --timeout 60
-```
+**Sites:** postmill, onestopshop, wiki

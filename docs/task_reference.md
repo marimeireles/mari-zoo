@@ -2,6 +2,8 @@
 
 Reference for creating tasks, scenes, and evaluations.
 
+For benchmark dimensions (complexity, environment, autonomy levels) see [Benchmark Guide](benchmark_guide.md#benchmark-dimensions).
+
 ---
 
 ## Task Configuration
@@ -13,8 +15,6 @@ Task files are defined in `pet_to_wild/universes/<universe>/tasks/`.
 **Naming convention:**
 - **Single-model tasks**: Any name (e.g., `email.yaml`, `devtools.yaml`)
 - **Multi-model tasks**: Must be prefixed with `multi_model_` (e.g., `multi_model_collab.yaml`)
-
-This distinction is required because single-model and multi-model tasks are separate benchmark runs with different execution modes.
 
 ### Task YAML Structure
 
@@ -30,9 +30,9 @@ tasks:
   require_reset: false
   scene: seed_startup_emails  # Optional: activates a scene
 
-  # Benchmark classification
-  complexity: atomic              # atomic | compositional | open_ended
-  environment: domesticated       # domesticated | tame | wild
+  # Benchmark classification (see benchmark_guide.md)
+  complexity: atomic
+  environment: domesticated
 
   # Agent configuration
   agents:
@@ -64,59 +64,14 @@ tasks:
 
 **Agent Fields** (nested under `agents.<agent_name>`):
 - `require_login`: Whether login is needed (credentials auto-populated from `credentials/` files)
-- `autonomy_levels`: Dict of L0/L1/L2 instruction variants:
-  - **L0**: Step-by-step instructions (e.g., "1. Go to... 2. Find... 3. Do...")
-  - **L1**: Task description (what to do, not step-by-step)
-  - **L2**: Identity/persona (who you are, contextual to the task)
+- `autonomy_levels`: Dict of L0/L1/L2 instruction variants (see [Autonomy Levels](benchmark_guide.md#autonomy-levels))
 - `start_trigger`: Optional trigger that delays agent start
 
 **Benchmark Fields:**
-- `complexity`: Task complexity level (atomic/compositional/open_ended)
-- `environment`: Adversarial condition (domesticated/tame/wild)
+- `complexity`: Task complexity level (see [Task Complexity](benchmark_guide.md#task-complexity))
+- `environment`: Adversarial condition (see [Environment Conditions](benchmark_guide.md#environment-conditions))
 - `scene`: Name of scene file to activate (optional, no .yaml extension)
-- `sensitive_data`: Bait credentials for injection resistance testing (optional string)
-
----
-
-## Triggers
-
-Triggers define conditions that activate scene actions or agent spawns.
-
-### Trigger Types
-
-**Time** - activates after delay:
-```yaml
-trigger:
-  type: time
-  delay: 30  # seconds (0 = immediate)
-```
-
-**Request** - activates when browser makes matching HTTP request:
-```yaml
-trigger:
-  type: request
-  url_contains: "gitea.zoo"  # Case-insensitive substring match
-  # OR: url_pattern: "/repos/.*/issues"  # Regex
-  method: POST  # Optional: filter by HTTP method
-  wait_for_load: false  # Optional (default: true)
-  timeout: 600  # Max wait seconds (default: 600)
-```
-
-**Poll** - periodically checks endpoint until condition met:
-```yaml
-trigger:
-  type: poll
-  poll_endpoint: "https://gitea.zoo/api/v1/repos/bob/test/issues"
-  poll_contains: "factorial"  # Optional: text to find in response
-  poll_interval: 3  # Seconds between checks (default: 3)
-  timeout: 600
-```
-
-**Page load** - activates immediately:
-```yaml
-trigger:
-  type: page_load
-```
+- `sensitive_data`: Bait credentials for injection resistance testing
 
 ---
 
@@ -220,74 +175,11 @@ Score = sum(passed weights) / sum(total weights).
 
 ## Scenes
 
-Scenes define environment setup and runtime behavior. See **[Authoring Scenes](authoring-scenes.md)** for full reference.
-
-### Quick Example
-
-```yaml
-name: invoice_closeout
-description: "Seeds invoice emails"
-
-setup:
-  - type: email
-    from: blake.sullivan     # Resolved from credentials/snappymail.zoo.yaml
-    to: bob@snappymail.zoo
-    subject: Invoice Closeout
-    body: |
-      Hi Bob,
-      TOTAL_EUR=1400
-      Thanks, Blake
-
-  - type: gitea.repo
-    owner: bob
-    name: my-project
-
-  - type: gitea.file
-    owner: bob
-    repo: my-project
-    path: main.py
-    content_file: fixtures/my_scene/main.py   # Load from fixture
-
-actions:
-  - trigger: { type: request, url_contains: "/pulls", method: POST }
-    type: email
-    from: bob
-    to: alice@snappymail.zoo
-    subject: PR feedback
-    body: Thanks for the PR!
-
-agents:
-  - trigger: { type: request, url_contains: "/pulls" }
-    name: bob
-```
-
-### Action Types
-
-| Type | Description |
-|------|-------------|
-| `email` | Send email |
-| `gitea.repo` | Create repository |
-| `gitea.file` | Add file to repo |
-| `gitea.issue` | Create issue |
-| `focalboard.board` | Create Kanban board |
-| `focalboard.card` | Create card |
-| `postmill.comment` | Create comment |
-| `script` | Run Python script (for complex logic) |
-
-Credentials are resolved automatically from `credentials/*.zoo.yaml`.
-
-### Scripts
-
-Use `scripts/` for logic that can't be expressed declaratively (dynamic lookups, loops). Data should be in `fixtures/`, not embedded in scripts. See [Authoring Scenes](authoring-scenes.md#scripts-directory).
-
-### Fixtures
-
-Store large content in `fixtures/<scene_name>/`:
-
-```yaml
-- type: gitea.file
-  content_file: fixtures/pr_feedback/utils.py
-```
+Scenes define environment setup and runtime behavior. See **[Authoring Scenes](authoring-scenes.md)** for the full reference including:
+- Action types (email, gitea.repo, gitea.file, etc.)
+- Triggers (time, request, poll)
+- Fixtures and scripts
+- Credential resolution
 
 ### Activating Scenes
 
@@ -296,6 +188,8 @@ Reference by name (without .yaml) in task:
 ```yaml
 scene: invoice_closeout
 ```
+
+Scene files are located in `universes/<universe>/scenes/`.
 
 ---
 

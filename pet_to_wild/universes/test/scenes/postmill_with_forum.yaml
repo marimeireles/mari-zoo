@@ -1,0 +1,9 @@
+name: postmill_with_forum
+description: "Creates a testing forum"
+
+setup:
+  - type: postmill.forum
+    owner: admin
+    name: testing
+    title: "Testing Forum"
+    description: "A forum for testing"

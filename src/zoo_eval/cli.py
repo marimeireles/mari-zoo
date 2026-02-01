@@ -11,7 +11,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .benchmark import BenchmarkConfig, run_benchmark
+from .benchmark import BenchmarkConfig, create_log_dir, run_benchmark
 from .models import AUTONOMY_LEVELS, AgentHarness, RunConfig, load_tasks, load_universe
 from .results import ResultsDB, print_report
 from .runner import TaskRunner
@@ -213,6 +213,11 @@ def run(
 
     levels_str = ", ".join(autonomy_levels)
     model_info = claude_model if harness_enum == AgentHarness.CLAUDE_SDK else model
+
+    # Create log directory for this run
+    log_dir = create_log_dir("run", universe_obj.name, task_file_name)
+    console.print(f"Logs: {log_dir}")
+
     console.print(f"Run #{run_id}: Running {len(tasks)} task(s) with harness={harness}, model={model_info}, levels=[{levels_str}]...")
     if completed_pairs:
         console.print(f"  ({len(remaining_pairs)} remaining, {len(completed_pairs)} already done)")
@@ -265,6 +270,24 @@ def run(
     # Finish run and show report
     db.finish_run(run_id)
     print_report(db, run_id)
+
+    # Save run summary to log directory
+    run_results = db.get_run_results(run_id)
+    run_stats = db.get_run_stats(run_id)
+    log_data = {
+        "run_id": run_id,
+        "universe": universe_obj.name,
+        "task_file": task_file_name,
+        "model": model_info,
+        "harness": harness,
+        "autonomy_levels": autonomy_levels,
+        "stats": run_stats,
+        "results": run_results,
+    }
+    with open(log_dir / "results.json", "w") as f:
+        json.dump(log_data, f, indent=2)
+    console.print(f"[green]Results saved to {log_dir}/results.json[/green]")
+
     db.close()
 
 
@@ -375,6 +398,7 @@ def mysql(
 
 @app.command()
 def benchmark(
+    universe: list[str] = typer.Option(None, "--universe", "-u", help="Universe(s) to run (default: all)"),
     multi_model: bool = typer.Option(False, "--multi-model", "-M", help="Run multi-model (heterogeneous) tasks only"),
     config_file: Path = typer.Option(None, "--config", "-c", help="YAML config file"),
     model: str = typer.Option("google/gemini-2.5-flash-lite", "--model", "-m", help="Agent model"),
@@ -387,9 +411,10 @@ def benchmark(
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
 ):
-    """Run full benchmark suite across all universes and tasks.
+    """Run benchmark suite across universes and tasks.
 
-    By default runs all homogeneous (single-model) tasks.
+    By default runs all homogeneous (single-model) tasks in all universes.
+    Use --universe/-u to filter to specific universe(s).
     Use --multi-model to run heterogeneous (multi-model) tasks instead.
     """
     # Load config from file or use CLI args
@@ -407,7 +432,8 @@ def benchmark(
             proxy_port=proxy_port,
         )
 
-    result = asyncio.run(run_benchmark(config, multi_model=multi_model, resume=resume))
+    universes_filter = list(universe) if universe else None
+    result = asyncio.run(run_benchmark(config, multi_model=multi_model, resume=resume, universes=universes_filter))
     if result is None:
         raise typer.Exit(1)
 

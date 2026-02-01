@@ -74,41 +74,12 @@ export OPENAI_API_KEY=your-key
 uv run zoo-eval run startup --task email --id 101 --model gpt-4o
 ```
 
-## Autonomy Levels
-
-Tasks run at all autonomy levels by default. See [Benchmark Guide](docs/benchmark_guide.md#autonomy-levels) for details.
-
-## Other Options
-
-```bash
-# Shared browser mode (agents run sequentially with shared context)
-uv run zoo-eval run startup --task email --shared-browser
-
-# Custom timeout and max steps
-uv run zoo-eval run startup --task email --id 101 --timeout 180 --max-steps 50
-
-# Resume an interrupted run
-uv run zoo-eval run startup --task email --resume
-```
-
 ## Documentation
 
-- [Benchmark Guide](docs/benchmark_guide.md) - Full task and evaluation configuration
-- [Authoring Scenes](docs/authoring-scenes.md) - Writing scene YAML files with declarative actions
+- [Benchmark Guide](docs/benchmark_guide.md) - Running benchmarks, autonomy levels, metrics
+- [Task Reference](docs/task_reference.md) - Creating tasks and evaluations
+- [Authoring Scenes](docs/authoring-scenes.md) - Writing scene YAML files
 - [Multi-Agent](docs/multi-agent.md) - Multi-agent evaluation details
-
-## Reports
-
-```bash
-# Show latest run report
-uv run zoo-eval report
-
-# List all runs
-uv run zoo-eval report --list
-
-# Show specific run
-uv run zoo-eval report 4
-```
 
 ## Other Commands
 

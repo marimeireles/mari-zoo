@@ -41,6 +41,8 @@ class ResultsDB:
                 run_id INTEGER,
                 task_id INTEGER,
                 task_name TEXT,
+                universe TEXT,
+                task_file TEXT,
                 autonomy_level TEXT DEFAULT 'L1',
                 complexity TEXT,
                 environment TEXT,
@@ -162,14 +164,16 @@ class ResultsDB:
         # Insert main task result
         cursor = self.conn.execute(
             """INSERT OR REPLACE INTO task_results
-               (run_id, task_id, task_name, autonomy_level, complexity, environment,
+               (run_id, task_id, task_name, universe, task_file, autonomy_level, complexity, environment,
                 score, subtasks_passed, subtasks_total, agent_answer, final_url,
                 error, steps, duration_seconds, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 run_id,
                 task.task_id,
                 task.intent,  # Use intent as task name
+                result.universe,
+                result.task_file,
                 task_result.autonomy_level,
                 task.complexity.value if task.complexity else None,
                 task.environment.value if task.environment else None,
@@ -266,7 +270,8 @@ class ResultsDB:
                 SUM(CASE WHEN error IS NOT NULL AND error != '' THEN 1 ELSE 0 END) as errors,
                 AVG(duration_seconds) as avg_duration,
                 SUM(duration_seconds) as total_duration,
-                AVG(steps) as avg_steps
+                AVG(steps) as avg_steps,
+                SUM(steps) as total_steps
                FROM task_results WHERE run_id = ?""",
             (run_id,),
         ).fetchone()
@@ -283,6 +288,7 @@ class ResultsDB:
             "avg_duration": row["avg_duration"] or 0,
             "total_duration": row["total_duration"] or 0,
             "avg_steps": row["avg_steps"] or 0,
+            "total_steps": row["total_steps"] or 0,
             "by_level": self._get_stats_by_column(
                 run_id, "autonomy_level", AUTONOMY_LEVELS, include_empty=True
             ),
@@ -297,10 +303,10 @@ class ResultsDB:
     def get_run_results(self, run_id: int) -> list[dict]:
         """Get all results for a run."""
         rows = self.conn.execute(
-            """SELECT task_id, task_name, autonomy_level, complexity, environment,
+            """SELECT task_id, task_name, universe, task_file, autonomy_level, complexity, environment,
                       score, subtasks_passed, subtasks_total, agent_answer, error,
                       steps, duration_seconds
-               FROM task_results WHERE run_id = ? ORDER BY task_id, autonomy_level""",
+               FROM task_results WHERE run_id = ? ORDER BY universe, task_file, task_id, autonomy_level""",
             (run_id,),
         ).fetchall()
 

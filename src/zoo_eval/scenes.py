@@ -343,6 +343,8 @@ class SceneManager:
             await self._run_script(action)
         elif action_type == "email":
             await self._run_email_action(action)
+        elif action_type.startswith("auth."):
+            await self._run_auth_action(action)
         elif action_type.startswith("gitea."):
             await self._run_gitea_action(action)
         elif action_type.startswith("focalboard."):
@@ -378,6 +380,30 @@ class SceneManager:
         except Exception as e:
             self.actions_log.append({"type": "email", "error": str(e), "success": False})
             print(f"  Email failed: {e}")
+
+    async def _run_auth_action(self, action: ActionPayload):
+        """Execute an Auth.zoo action (user creation)."""
+        from .zoo_cli import auth_create_user
+
+        data = action.data
+        subtype = action.action_type.split(".", 1)[1]
+
+        try:
+            if subtype == "user":
+                result = auth_create_user(
+                    username=data["username"],
+                    email=data.get("email", f"{data['username']}@snappymail.zoo"),
+                    name=data.get("name", data["username"]),
+                    password=data["password"],
+                )
+                if result.get("already_exists"):
+                    self.actions_log.append({"type": "auth.user", "username": data["username"], "success": True, "already_exists": True})
+                else:
+                    self.actions_log.append({"type": "auth.user", "username": data["username"], "success": True})
+
+        except Exception as e:
+            self.actions_log.append({"type": action.action_type, "error": str(e), "success": False})
+            print(f"  Auth action failed: {e}")
 
     async def _run_gitea_action(self, action: ActionPayload):
         """Execute a Gitea action (repo, file, issue)."""
@@ -461,26 +487,55 @@ class SceneManager:
             print(f"  Focalboard action failed: {e}")
 
     async def _run_postmill_action(self, action: ActionPayload):
-        """Execute a Postmill action (comment)."""
+        """Execute a Postmill action (forum, submission, comment)."""
         from .auth import get_credential
-        from .zoo_cli import postmill_login, postmill_create_comment
+        from .zoo_cli import postmill_login, postmill_create_comment, postmill_create_forum, postmill_create_submission
 
         data = action.data
         subtype = action.action_type.split(".", 1)[1]
 
         try:
-            user = data.get("user")
+            user = data.get("user", data.get("owner"))
             cred = get_credential("postmill", user)
             session = postmill_login(cred.username, cred.password)
 
-            if subtype == "comment":
+            if subtype == "forum":
+                result = postmill_create_forum(
+                    session=session,
+                    name=data["name"],
+                    title=data.get("title", data["name"]),
+                    description=data.get("description", ""),
+                    sidebar=data.get("sidebar", ""),
+                )
+                self.actions_log.append({"type": "postmill.forum", "name": data["name"], "success": True})
+
+            elif subtype == "submission":
+                result = postmill_create_submission(
+                    session=session,
+                    forum=data["forum"],
+                    title=data["title"],
+                    body=self._load_content(data, "body"),
+                    url=data.get("url", ""),
+                )
+                # Store submission ID for later use
+                if result.get("id"):
+                    self._scene_context = getattr(self, "_scene_context", {})
+                    self._scene_context["submission_id"] = result["id"]
+                self.actions_log.append({"type": "postmill.submission", "title": data["title"], "success": True})
+
+            elif subtype == "comment":
+                submission_id = data.get("submission_id") or getattr(self, "_scene_context", {}).get("submission_id")
+                if not submission_id:
+                    raise ValueError("No submission_id - create a submission first or provide submission_id")
                 postmill_create_comment(
                     session=session,
-                    submission_id=data["submission_id"],
+                    submission_id=submission_id,
                     body=self._load_content(data, "body"),
                     parent_id=data.get("parent_id"),
                 )
                 self.actions_log.append({"type": "postmill.comment", "success": True})
+
+            session.close()
 
         except Exception as e:
             self.actions_log.append({"type": action.action_type, "error": str(e), "success": False})

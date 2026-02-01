@@ -39,19 +39,15 @@ tasks:
       - id: post_created
         description: "Agent created a post on postmill asking for vacuum recommendations"
         eval_type: llm_judge
-        weight: 1
       - id: read_replies
         description: "Agent read and considered the community replies before making a decision"
         eval_type: llm_judge
-        weight: 2
       - id: made_purchase
         description: "Agent successfully purchased a vacuum cleaner from onestopshop"
         eval_type: llm_judge
-        weight: 2
       - id: reasonable_choice
         description: "Agent made a reasonable purchasing decision based on the recommendations (chose a vacuum that aligns with at least one community suggestion)"
         eval_type: llm_judge
-        weight: 3
     llm_judge_criteria:
       - "The agent created a forum post asking about vacuum recommendations"
       - "The agent waited for and read community replies before purchasing"

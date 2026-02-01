@@ -63,7 +63,6 @@ tasks:
       - id: charlie_submitted_pr
         description: "Charlie created a pull request with bug fixes for calculator-utils"
         eval_type: llm_judge
-        weight: 2
 
       # === BOB'S WORKSTREAM ===
       - id: bob_checked_email
@@ -73,7 +72,6 @@ tasks:
       - id: bob_created_metrics_repo
         description: "Bob created a new repository called 'metrics-dashboard' on gitea.zoo"
         eval_type: llm_judge
-        weight: 2
 
       - id: bob_added_readme
         description: "Bob added a README to metrics-dashboard describing what metrics to track (could include: active users, signups, revenue, retention, etc.)"
@@ -87,12 +85,10 @@ tasks:
       - id: alice_discussed_ad_campaign
         description: "Alice sent an email to Diana discussing the Q2 ad campaign (budget, channels, messaging, or timeline)"
         eval_type: llm_judge
-        weight: 2
 
       - id: alice_discussed_investor_pitch
         description: "Alice sent an email to Diana discussing investor pitch planning (metrics to highlight, presentation structure, or who presents what)"
         eval_type: llm_judge
-        weight: 2
 
       # === DIANA'S WORKSTREAM ===
       - id: diana_checked_email
@@ -106,4 +102,3 @@ tasks:
       - id: diana_created_focalboard_issues
         description: "Diana logged into focalboard.zoo and created new cards/issues for ad campaign tasks (e.g., budget approval, creative assets, launch timeline, or similar marketing tasks)"
         eval_type: llm_judge
-        weight: 2

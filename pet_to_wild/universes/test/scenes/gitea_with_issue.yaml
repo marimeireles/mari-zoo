@@ -1,0 +1,13 @@
+name: gitea_with_issue
+description: "Creates a repo with an issue"
+
+setup:
+  - type: gitea.repo
+    owner: alice
+    name: test-repo
+    description: "Test repository"
+  - type: gitea.issue
+    owner: alice
+    repo: test-repo
+    title: "Test Issue"
+    body: "This is a test issue for API testing."

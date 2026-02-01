@@ -1,0 +1,11 @@
+name: focalboard_with_board
+description: "Creates a board with a card"
+
+setup:
+  - type: focalboard.board
+    user: alice
+    title: "Project Board"
+  - type: focalboard.card
+    user: alice
+    title: "Test Task"
+    description: "This is a test task"

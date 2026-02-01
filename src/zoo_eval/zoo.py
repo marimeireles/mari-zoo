@@ -164,10 +164,32 @@ class Zoo:
                 print(" FAILED")
             return False
 
-        # Wait for postgres to be ready
-        time.sleep(10)
+        # Wait for postgres to be healthy (not just a fixed sleep)
+        if not self.wait_for_services(["postgres"], timeout=60, verbose=False):
+            if verbose:
+                print(" FAILED (timeout)")
+            return False
         if verbose:
             print(" OK")
+
+        # If snappymail is being reset, also restart stalwart to recreate users
+        # with properly hashed passwords (stalwart runs create-users.sh on startup)
+        if "snappymail.zoo" in sites:
+            if verbose:
+                print("  Restarting stalwart (recreating mail users)...", end="", flush=True)
+            result = self._docker_compose("restart", "stalwart", timeout=60)
+            if result.returncode != 0:
+                if verbose:
+                    print(" FAILED")
+                return False
+            # Wait for stalwart to be healthy
+            if not self.wait_for_services(["stalwart"], timeout=60, verbose=False):
+                if verbose:
+                    print(" FAILED (timeout)")
+                return False
+            if verbose:
+                print(" OK")
+
         return True
 
     def restart(self, services: list[str] | None = None) -> bool:

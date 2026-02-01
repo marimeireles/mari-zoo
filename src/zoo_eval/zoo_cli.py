@@ -103,6 +103,85 @@ class SeedTracker:
 
 
 # =============================================================================
+# Auth.zoo API (Direct HTTP)
+# =============================================================================
+
+AUTH_ZOO_API_KEY = "zoo-seed-api-key"
+
+
+def _auth_request(
+    endpoint: str,
+    method: str = "GET",
+    body: dict | None = None,
+) -> Any:
+    """Make a request to Auth.zoo API."""
+    with _get_http_client() as client:
+        url = f"https://auth.zoo{endpoint}"
+        headers = {
+            "Content-Type": "application/json",
+            "X-API-Key": AUTH_ZOO_API_KEY,
+        }
+
+        response = client.request(
+            method=method,
+            url=url,
+            json=body,
+            headers=headers,
+        )
+
+        if response.status_code >= 400:
+            if response.status_code == 409:
+                return {"already_exists": True}
+            raise RuntimeError(f"Auth.zoo API error {response.status_code}: {response.text}")
+
+        if response.text:
+            try:
+                return response.json()
+            except Exception:
+                return response.text
+        return {}
+
+
+def auth_create_user(
+    username: str,
+    email: str,
+    name: str,
+    password: str,
+) -> dict:
+    """Create a user in auth.zoo.
+
+    Args:
+        username: User's username (for login)
+        email: User's email address
+        name: User's full name
+        password: User's password
+
+    Returns:
+        Dict with user info or already_exists flag
+    """
+    return _auth_request(
+        "/api/users",
+        method="POST",
+        body={
+            "username": username,
+            "email": email,
+            "name": name,
+            "password": password,
+        },
+    )
+
+
+def auth_list_users() -> list[dict]:
+    """List all users in auth.zoo.
+
+    Returns:
+        List of user dicts
+    """
+    response = _auth_request("/api/users")
+    return response if isinstance(response, list) else []
+
+
+# =============================================================================
 # Gitea API (Direct HTTP)
 # =============================================================================
 
@@ -681,6 +760,130 @@ class PostmillSession:
 
         return {"success": True, "submission_id": submission_id}
 
+    def create_forum(
+        self,
+        name: str,
+        title: str,
+        description: str = "",
+        sidebar: str = "",
+    ) -> dict:
+        """Create a new forum.
+
+        Args:
+            name: Forum URL name (lowercase, no spaces)
+            title: Display title for the forum
+            description: Short description
+            sidebar: Sidebar content (markdown)
+
+        Returns:
+            Dict with success status and forum name
+        """
+        if not self._logged_in:
+            self.login()
+
+        # Get the create forum page to get CSRF token
+        response = self._request("/create_forum")
+        if response.status_code != 200:
+            raise RuntimeError(f"Failed to get create forum page: {response.status_code}")
+
+        self._csrf_token = self._extract_csrf_token(response.text)
+        if not self._csrf_token:
+            raise RuntimeError("Could not find CSRF token on create forum page")
+
+        # Submit the form
+        data = {
+            "create_forum[name]": name,
+            "create_forum[title]": title,
+            "create_forum[description]": description,
+            "create_forum[sidebar]": sidebar,
+        }
+
+        response = self._request("/create_forum", method="POST", data=data)
+
+        # Check if forum was created (redirect to forum page or shows forum)
+        if response.status_code >= 400:
+            raise RuntimeError(f"Failed to create forum: {response.status_code}")
+
+        # Check if we got redirected to the new forum
+        if f"/f/{name}" in str(response.url) or name.lower() in response.text.lower():
+            return {"success": True, "name": name, "title": title}
+
+        # Check for error messages
+        if "already" in response.text.lower() or "exists" in response.text.lower():
+            return {"success": True, "name": name, "already_exists": True}
+
+        return {"success": True, "name": name}
+
+    def create_submission(
+        self,
+        forum: str,
+        title: str,
+        body: str = "",
+        url: str = "",
+    ) -> dict:
+        """Create a new submission/post in a forum.
+
+        Args:
+            forum: Forum name to post in
+            title: Submission title
+            body: Text body (for text submissions)
+            url: URL (for link submissions) - if provided, body is ignored
+
+        Returns:
+            Dict with success status and submission info
+        """
+        if not self._logged_in:
+            self.login()
+
+        # Determine submission type
+        is_link = bool(url)
+        submit_type = "link" if is_link else "text"
+
+        # Get the submit page to get CSRF token
+        submit_url = f"/f/{forum}/submit/{submit_type}"
+        response = self._request(submit_url)
+        if response.status_code != 200:
+            # Try alternate URL format
+            submit_url = f"/submit/{submit_type}?forum={forum}"
+            response = self._request(submit_url)
+            if response.status_code != 200:
+                raise RuntimeError(f"Failed to get submit page: {response.status_code}")
+
+        self._csrf_token = self._extract_csrf_token(response.text)
+        if not self._csrf_token:
+            raise RuntimeError("Could not find CSRF token on submit page")
+
+        # Submit the form
+        if is_link:
+            data = {
+                "submission[title]": title,
+                "submission[url]": url,
+                "submission[forum]": forum,
+            }
+        else:
+            data = {
+                "submission[title]": title,
+                "submission[body]": body,
+                "submission[forum]": forum,
+            }
+
+        response = self._request(submit_url, method="POST", data=data)
+
+        if response.status_code >= 400:
+            raise RuntimeError(f"Failed to create submission: {response.status_code}")
+
+        # Try to extract submission ID from redirect URL
+        import re
+        match = re.search(r'/f/[^/]+/(\d+)/', str(response.url))
+        submission_id = int(match.group(1)) if match else None
+
+        return {
+            "success": True,
+            "forum": forum,
+            "title": title,
+            "id": submission_id,
+        }
+
 
 def postmill_login(username: str, password: str) -> PostmillSession:
     """Login to Postmill and return authenticated session.
@@ -736,3 +939,47 @@ def postmill_create_comment(
         Dict with success status
     """
     return session.create_comment(submission_id, body, parent_id)
+
+
+def postmill_create_forum(
+    session: PostmillSession,
+    name: str,
+    title: str,
+    description: str = "",
+    sidebar: str = "",
+) -> dict:
+    """Create a new forum in Postmill.
+
+    Args:
+        session: Authenticated PostmillSession
+        name: Forum URL name (lowercase, no spaces, e.g., "testing")
+        title: Display title for the forum
+        description: Short description of the forum
+        sidebar: Sidebar content (supports markdown)
+
+    Returns:
+        Dict with success status and forum name
+    """
+    return session.create_forum(name, title, description, sidebar)
+
+
+def postmill_create_submission(
+    session: PostmillSession,
+    forum: str,
+    title: str,
+    body: str = "",
+    url: str = "",
+) -> dict:
+    """Create a new submission/post in a Postmill forum.
+
+    Args:
+        session: Authenticated PostmillSession
+        forum: Forum name to post in
+        title: Submission title
+        body: Text body (for text submissions)
+        url: URL (for link submissions) - if provided, creates a link post
+
+    Returns:
+        Dict with success status and submission info including ID if available
+    """
+    return session.create_submission(forum, title, body, url)

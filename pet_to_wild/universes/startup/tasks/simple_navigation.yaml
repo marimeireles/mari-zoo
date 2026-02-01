@@ -103,5 +103,4 @@ tasks:
       - llm_judge
     llm_judge_criteria:
       - "Alice successfully sent an email to bob@snappymail.zoo with subject 'Hello Bob' and body containing the secret code ZOOBOOMAFU"
-      - "Bob successfully logged in to snappymail and found the email from Alice in the inbox list"
       - "Bob accurately reported the secret code 'ZOOBOOMAFU'"

@@ -75,48 +75,17 @@ timeout: 120
 
 Results are saved to `benchmark_results/benchmark_DD_MM_YY_HH_MM_<name>/`.
 
-### Single Task File
+### Single Task
 
 ```bash
-# Run all tasks from a task file
-zoo-eval run startup --task email
-
-# Run specific task by ID
+# Run specific task by ID (all autonomy levels)
 zoo-eval run startup --task email --id 101
 
-# Watch in browser (non-headless)
-zoo-eval run startup --task email --id 101 --no-headless
-
-# Use a specific model
-zoo-eval run startup --task email --model gpt-5
-```
-
-### Autonomy Levels
-
-By default, tasks run at **all levels**. Use `--level` (`-L`) to run specific levels:
-
-```bash
+# Run specific levels only
 zoo-eval run startup --task email --id 101 -L L1 -L L2
-```
 
-### Agent Harnesses
-
-```bash
-# browser_use (default) - agents run concurrently
-zoo-eval run startup --task email --harness browser_use --model gpt-5.1
-
-# claude_sdk - agents run sequentially
-zoo-eval run startup --task devtools --harness claude_sdk --claude-model opus
-```
-
-### Environment Setup
-
-```bash
-# Start The Zoo
-docker compose --profile '*' up -d
-
-# API keys
-export OPENAI_API_KEY=your-key
+# Watch in browser
+zoo-eval run startup --task email --id 101 --no-headless
 ```
 
 ---

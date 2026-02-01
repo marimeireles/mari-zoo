@@ -48,6 +48,8 @@ class RunResult:
 
     task: Task
     task_result: TaskResult
+    universe: str = ""  # Universe name
+    task_file: str = ""  # Task file name (without extension)
 
     @property
     def score(self) -> float:
@@ -81,13 +83,14 @@ class TaskRunner:
         pass
 
     async def run_and_evaluate_batch(
-        self, tasks: list[Task], universe_name: str = "unknown"
+        self, tasks: list[Task], universe_name: str = "unknown", task_file: str = ""
     ) -> list[RunResult]:
         """Run multiple tasks distributed across agents and evaluate results.
 
         Args:
             tasks: Tasks to run
             universe_name: Name of the universe (for human review file organization)
+            task_file: Name of the task file (without extension)
         """
         # Run all tasks
         task_results = await self._agent_runner.run_tasks(tasks)
@@ -107,6 +110,11 @@ class TaskRunner:
                 universe_name=universe_name,
                 judge_model=self.config.judge_model,
             )
-            run_results.append(RunResult(task=task, task_result=task_result))
+            run_results.append(RunResult(
+                task=task,
+                task_result=task_result,
+                universe=universe_name,
+                task_file=task_file,
+            ))
 
         return run_results

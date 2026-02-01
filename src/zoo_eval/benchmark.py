@@ -9,6 +9,7 @@ Outputs comprehensive metrics report to a timestamped directory.
 
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -17,6 +18,7 @@ from typing import Any
 
 import yaml
 from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn, TimeElapsedColumn
 
 from .models import (
     AUTONOMY_LEVELS,
@@ -39,7 +41,7 @@ MULTI_MODEL_TASK_FILES = {"multi_model"}
 
 
 def _generate_run_name() -> str:
-    """Generate a cute random name for the benchmark run."""
+    """Generate a cute random name for the run."""
     import random
     adjectives = ["swift", "bright", "calm", "bold", "keen", "warm", "cool", "quick"]
     nouns = ["fox", "owl", "wolf", "bear", "hawk", "lynx", "deer", "hare"]
@@ -47,13 +49,29 @@ def _generate_run_name() -> str:
 
 
 def _create_output_dir(base_path: Path = Path("benchmark_results")) -> Path:
-    """Create timestamped output directory with cute name."""
+    """Create timestamped output directory for benchmark results."""
     timestamp = datetime.now().strftime("%d_%m_%y_%H_%M")
     name = _generate_run_name()
     dir_name = f"benchmark_{timestamp}_{name}"
     output_dir = base_path / dir_name
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
+
+
+def create_log_dir(prefix: str = "run", universe: str = "", task_file: str = "") -> Path:
+    """Create a log directory for any run (benchmark or individual)."""
+    timestamp = datetime.now().strftime("%d-%m-%y_%H-%M-%S")
+    name = _generate_run_name()
+    parts = [prefix, timestamp]
+    if universe:
+        parts.append(universe)
+    if task_file:
+        parts.append(task_file)
+    parts.append(name)
+    dir_name = "_".join(parts)
+    log_dir = Path("logs") / dir_name
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir
 
 
 @dataclass
@@ -172,6 +190,8 @@ class BenchmarkMetrics:
     overall_score: float
     overall_completion_rate: float
     total_duration_seconds: float
+    avg_duration_per_task: float
+    total_steps: int
     avg_steps_per_task: float
     error_count: int
 
@@ -181,22 +201,19 @@ class BenchmarkMetrics:
 
     # By environment
     by_environment: dict[str, dict[str, Any]]
-    environment_resilience: float | None  # wild_score / domesticated_score
 
-    # By complexity
+    # By complexity (with efficiency)
     by_complexity: dict[str, dict[str, Any]]
 
-    # Efficiency metrics
+    # Hierarchical breakdown: universe → task_file → task
+    by_universe: dict[str, dict[str, Any]]
+
+    # Overall efficiency
     avg_duration_per_success: float
     avg_steps_per_success: float
 
-    # Subtask aggregates
-    total_subtasks: int
-    subtasks_passed: int
-    subtask_pass_rate: float
-
-    # Task-level details
-    task_results: list[dict[str, Any]]
+    # Raw results for CSV export (not included in JSON)
+    _raw_results: list[dict[str, Any]] = field(default_factory=list, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON export."""
@@ -215,6 +232,8 @@ class BenchmarkMetrics:
                 "overall_score": round(self.overall_score, 4),
                 "overall_completion_rate": round(self.overall_completion_rate, 4),
                 "total_duration_seconds": round(self.total_duration_seconds, 2),
+                "avg_duration_per_task": round(self.avg_duration_per_task, 2),
+                "total_steps": self.total_steps,
                 "avg_steps_per_task": round(self.avg_steps_per_task, 2),
                 "error_count": self.error_count,
             },
@@ -224,7 +243,6 @@ class BenchmarkMetrics:
             },
             "environment": {
                 "by_type": self.by_environment,
-                "resilience": round(self.environment_resilience, 4) if self.environment_resilience else None,
             },
             "complexity": {
                 "by_type": self.by_complexity,
@@ -233,13 +251,50 @@ class BenchmarkMetrics:
                 "avg_duration_per_success": round(self.avg_duration_per_success, 2),
                 "avg_steps_per_success": round(self.avg_steps_per_success, 2),
             },
-            "subtasks": {
-                "total": self.total_subtasks,
-                "passed": self.subtasks_passed,
-                "pass_rate": round(self.subtask_pass_rate, 4),
-            },
-            "task_results": self.task_results,
+            "by_universe": self.by_universe,
         }
+
+    def to_csv_rows(self) -> list[dict[str, Any]]:
+        """Convert raw results to CSV-friendly rows."""
+        return self._raw_results
+
+
+def _compute_group_stats(results: list[dict]) -> dict[str, Any]:
+    """Compute stats for a group of results."""
+    if not results:
+        return {"total": 0, "completed": 0, "completion_rate": 0, "avg_score": 0,
+                "avg_duration": 0, "avg_steps": 0}
+
+    total = len(results)
+    completed = sum(1 for r in results if r.get("score", 0) >= 1.0)
+    avg_score = sum(r.get("score", 0) for r in results) / total
+    avg_duration = sum(r.get("duration_seconds", 0) for r in results) / total
+    avg_steps = sum(r.get("steps", 0) for r in results) / total
+
+    return {
+        "total": total,
+        "completed": completed,
+        "completion_rate": round(completed / total * 100, 2),
+        "avg_score": round(avg_score, 4),
+        "avg_duration": round(avg_duration, 2),
+        "avg_steps": round(avg_steps, 2),
+    }
+
+
+def _compute_efficiency_stats(results: list[dict]) -> dict[str, float]:
+    """Compute efficiency stats for successful results only."""
+    successful = [r for r in results if r.get("score", 0) >= 1.0]
+    if not successful:
+        return {"avg_duration_per_success": 0, "avg_steps_per_success": 0}
+
+    return {
+        "avg_duration_per_success": round(
+            sum(r.get("duration_seconds", 0) for r in successful) / len(successful), 2
+        ),
+        "avg_steps_per_success": round(
+            sum(r.get("steps", 0) for r in successful) / len(successful), 2
+        ),
+    }
 
 
 def compute_metrics(
@@ -253,8 +308,21 @@ def compute_metrics(
         "SELECT started_at, finished_at FROM runs WHERE id = ?", (run_id,)
     ).fetchone()
 
+    # By autonomy level with efficiency
+    by_level = {}
+    for level in AUTONOMY_LEVELS:
+        level_results = [r for r in results if r.get("autonomy_level") == level]
+        if level_results:
+            by_level[level] = {
+                **_compute_group_stats(level_results),
+                **_compute_efficiency_stats(level_results),
+            }
+        else:
+            by_level[level] = {"total": 0, "completed": 0, "completion_rate": 0, "avg_score": 0,
+                              "avg_duration": 0, "avg_steps": 0,
+                              "avg_duration_per_success": 0, "avg_steps_per_success": 0}
+
     # Autonomy Score = (1×CR_L0 + 2×CR_L1 + 3×CR_L2) / 6
-    by_level = stats.get("by_level", {})
     weights = {"L0": 1, "L1": 2, "L2": 3}
     weighted_sum = 0.0
     for level, weight in weights.items():
@@ -263,13 +331,64 @@ def compute_metrics(
         weighted_sum += weight * completion_rate
     autonomy_score = weighted_sum / 6
 
-    # Environment Resilience = wild_score / domesticated_score
-    by_env = stats.get("by_environment", {})
-    dom_score = by_env.get("domesticated", {}).get("avg_score", 0)
-    wild_score = by_env.get("wild", {}).get("avg_score", 0)
-    environment_resilience = wild_score / dom_score if dom_score > 0 else None
+    # By environment with efficiency
+    by_env = {}
+    for env in ENVIRONMENTS:
+        env_results = [r for r in results if r.get("environment") == env]
+        if env_results:
+            by_env[env] = {
+                **_compute_group_stats(env_results),
+                **_compute_efficiency_stats(env_results),
+            }
 
-    # Efficiency metrics per successful task
+    # By complexity with efficiency
+    by_complexity = {}
+    for complexity in COMPLEXITIES:
+        complexity_results = [r for r in results if r.get("complexity") == complexity]
+        if complexity_results:
+            by_complexity[complexity] = {
+                **_compute_group_stats(complexity_results),
+                **_compute_efficiency_stats(complexity_results),
+            }
+
+    # Hierarchical breakdown: universe → task_file → task
+    by_universe: dict[str, Any] = {}
+
+    for r in results:
+        universe = r.get("universe") or "unknown"
+        task_file = r.get("task_file") or "unknown"
+        task_id = r["task_id"]
+
+        if universe not in by_universe:
+            by_universe[universe] = {"task_files": {}, "_results": []}
+        by_universe[universe]["_results"].append(r)
+
+        if task_file not in by_universe[universe]["task_files"]:
+            by_universe[universe]["task_files"][task_file] = {"tasks": {}, "_results": []}
+        by_universe[universe]["task_files"][task_file]["_results"].append(r)
+
+        if task_id not in by_universe[universe]["task_files"][task_file]["tasks"]:
+            by_universe[universe]["task_files"][task_file]["tasks"][task_id] = []
+        by_universe[universe]["task_files"][task_file]["tasks"][task_id].append(r)
+
+    # Compute stats at each level
+    for universe, udata in by_universe.items():
+        universe_results = udata.pop("_results")
+        udata.update(_compute_group_stats(universe_results))
+        udata.update(_compute_efficiency_stats(universe_results))
+
+        for task_file, tfdata in udata["task_files"].items():
+            tf_results = tfdata.pop("_results")
+            tfdata.update(_compute_group_stats(tf_results))
+            tfdata.update(_compute_efficiency_stats(tf_results))
+
+            for task_id, task_results in tfdata["tasks"].items():
+                tfdata["tasks"][task_id] = {
+                    **_compute_group_stats(task_results),
+                    **_compute_efficiency_stats(task_results),
+                }
+
+    # Overall efficiency
     successful_results = [r for r in results if r.get("score", 0) >= 1.0]
     if successful_results:
         avg_duration_per_success = sum(r.get("duration_seconds", 0) for r in successful_results) / len(successful_results)
@@ -278,21 +397,24 @@ def compute_metrics(
         avg_duration_per_success = 0
         avg_steps_per_success = 0
 
-    # Format task results
-    task_results = []
+    # Format raw results for CSV export
+    csv_results = []
     for r in results:
-        task_results.append({
+        csv_results.append({
+            "universe": r.get("universe", ""),
+            "task_file": r.get("task_file", ""),
             "task_id": r["task_id"],
             "task_name": r.get("task_name", ""),
             "autonomy_level": r.get("autonomy_level", "L1"),
-            "complexity": r.get("complexity"),
-            "environment": r.get("environment"),
+            "complexity": r.get("complexity", ""),
+            "environment": r.get("environment", ""),
             "score": round(r.get("score", 0), 4),
-            "subtasks_passed": r.get("subtasks_passed", 0),
-            "subtasks_total": r.get("subtasks_total", 0),
+            "completed": 1 if r.get("score", 0) >= 1.0 else 0,
             "steps": r.get("steps", 0),
             "duration_seconds": round(r.get("duration_seconds", 0), 2),
-            "error": r.get("error"),
+            "subtasks_passed": r.get("subtasks_passed", 0),
+            "subtasks_total": r.get("subtasks_total", 0),
+            "error": r.get("error", ""),
         })
 
     return BenchmarkMetrics(
@@ -307,19 +429,18 @@ def compute_metrics(
         overall_score=stats["avg_score"],
         overall_completion_rate=stats["completion_rate"] / 100,
         total_duration_seconds=stats["total_duration"],
+        avg_duration_per_task=stats["avg_duration"],
+        total_steps=stats["total_steps"],
         avg_steps_per_task=stats["avg_steps"],
         error_count=stats["errors"],
         by_autonomy_level=by_level,
         autonomy_score=autonomy_score,
         by_environment=by_env,
-        environment_resilience=environment_resilience,
-        by_complexity=stats.get("by_complexity", {}),
+        by_complexity=by_complexity,
+        by_universe=by_universe,
         avg_duration_per_success=avg_duration_per_success,
         avg_steps_per_success=avg_steps_per_success,
-        task_results=task_results,
-        total_subtasks=stats["total_subtasks"],
-        subtasks_passed=stats["total_subtasks_passed"],
-        subtask_pass_rate=stats["total_subtasks_passed"] / stats["total_subtasks"] if stats["total_subtasks"] else 0,
+        _raw_results=csv_results,
     )
 
 
@@ -327,6 +448,7 @@ async def run_benchmark(
     config: BenchmarkConfig,
     multi_model: bool = False,
     resume: bool = False,
+    universes: list[str] | None = None,
 ) -> BenchmarkMetrics | None:
     """Run the benchmark suite.
 
@@ -334,6 +456,7 @@ async def run_benchmark(
         config: Benchmark configuration
         multi_model: If True, run multi-model tasks; if False, run homogeneous tasks
         resume: Resume from previous run
+        universes: List of universe names to run (default: all)
 
     Returns:
         BenchmarkMetrics or None if no tasks to run
@@ -346,16 +469,27 @@ async def run_benchmark(
         return None
 
     # Discover universes and tasks
-    universes = discover_universes()
-    if not universes:
+    all_universe_paths = discover_universes()
+    if not all_universe_paths:
         console.print("[red]No universes found in pet_to_wild/universes/[/red]")
         return None
+
+    # Filter universes if specified
+    if universes:
+        universe_set = set(universes)
+        universe_paths = [p for p in all_universe_paths if p.name in universe_set]
+        if not universe_paths:
+            available = [p.name for p in all_universe_paths]
+            console.print(f"[red]No matching universes found. Available: {', '.join(available)}[/red]")
+            return None
+    else:
+        universe_paths = all_universe_paths
 
     # Collect tasks based on benchmark type
     all_tasks: list[tuple[Path, Path, list[Task]]] = []
     benchmark_type = "multi_model" if multi_model else "homogeneous"
 
-    for universe_path in universes:
+    for universe_path in universe_paths:
         universe_obj = load_universe(universe_path)
 
         if multi_model:
@@ -421,6 +555,21 @@ async def run_benchmark(
     # Save config to output directory
     config.to_yaml(output_dir / "config.yaml")
 
+    # Create log directory for incremental logging
+    log_dir = create_log_dir("benchmark", benchmark_type)
+    console.print(f"Logs: {log_dir}")
+
+    # Initialize log file with run info
+    log_file = log_dir / "run.log"
+    with open(log_file, "w") as f:
+        f.write(f"Benchmark Run #{run_id}\n")
+        f.write(f"Type: {benchmark_type}\n")
+        f.write(f"Model: {config.model}\n")
+        f.write(f"Harness: {config.harness}\n")
+        f.write(f"Total tasks: {total_runs}\n")
+        f.write(f"Output: {output_dir}\n")
+        f.write("-" * 50 + "\n")
+
     # Run config
     run_config = RunConfig(
         headless=config.headless,
@@ -437,32 +586,61 @@ async def run_benchmark(
         redis_url=config.redis_url,
     )
 
-    # Run each universe's tasks
-    for universe_path, task_file, tasks in all_tasks:
-        universe_obj = load_universe(universe_path)
-        console.print(f"[cyan]{universe_obj.name}/{task_file.stem}[/cyan]")
+    # Run each universe's tasks with progress bar
+    completed_count = 0
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task_progress = progress.add_task(
+            f"[cyan]Running {benchmark_type} benchmark...", total=total_runs
+        )
 
-        runner = TaskRunner(zoo, run_config, universe_path, universe_obj)
-        await runner.setup()
+        for universe_path, task_file, tasks in all_tasks:
+            universe_obj = load_universe(universe_path)
+            progress.update(task_progress, description=f"[cyan]{universe_obj.name}/{task_file.stem}")
 
-        try:
-            results = await runner.run_and_evaluate_batch(tasks, universe_obj.name)
+            runner = TaskRunner(zoo, run_config, universe_path, universe_obj)
+            await runner.setup()
 
-            for result in results:
-                db.save_result(run_id, result)
-        finally:
-            await runner.teardown()
+            try:
+                results = await runner.run_and_evaluate_batch(tasks, universe_obj.name, task_file.stem)
+
+                for result in results:
+                    db.save_result(run_id, result)
+                    completed_count += 1
+                    progress.update(task_progress, completed=completed_count)
+                    # Log result incrementally
+                    with open(log_file, "a") as f:
+                        status = "✓" if result.score >= 1.0 else "✗"
+                        f.write(f"{status} Task {result.task.task_id} ({result.task_result.autonomy_level}): {result.score:.2f} ({result.task_result.duration_seconds:.1f}s)\n")
+            finally:
+                await runner.teardown()
 
     db.finish_run(run_id)
 
     # Compute metrics
     metrics = compute_metrics(db, run_id, config.model, config.harness, benchmark_type)
 
-    # Export results
+    # Export JSON metrics
     with open(output_dir / "metrics.json", "w") as f:
         json.dump(metrics.to_dict(), f, indent=2)
 
-    console.print(f"[green]Results saved to {output_dir}[/green]")
+    # Export CSV results
+    csv_rows = metrics.to_csv_rows()
+    if csv_rows:
+        csv_path = output_dir / "results.csv"
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=csv_rows[0].keys())
+            writer.writeheader()
+            writer.writerows(csv_rows)
+        console.print(f"[green]Results saved to {output_dir} (metrics.json + results.csv)[/green]")
+    else:
+        console.print(f"[green]Results saved to {output_dir}[/green]")
 
     db.close()
     return metrics
