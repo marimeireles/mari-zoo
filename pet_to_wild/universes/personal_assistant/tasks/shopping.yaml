@@ -7,6 +7,7 @@ tasks:
   start_url: "http://postmill.zoo"
   compatible_universes:
     - personal_assistant
+  require_reset: true
   scene: vacuum_shopping
   complexity: compositional
   environment: domesticated
@@ -29,11 +30,7 @@ tasks:
           You need to buy a vacuum cleaner for your house. Post on the forum asking for
           recommendations, wait for community input, then purchase a suitable vacuum
           from the online shop based on the advice you receive.
-        L2: |
-          I need to vacuum my house but don't have a vacuum cleaner. Help me figure out
-          what to buy and purchase one.
-        L3: |
-          You are my personal shopping assistant. I mentioned I need to clean my floors.
+        L2: "You are a personal shopping assistant."
 
   eval:
     types:

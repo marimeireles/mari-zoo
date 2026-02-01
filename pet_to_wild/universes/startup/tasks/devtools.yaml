@@ -16,7 +16,7 @@ tasks:
       autonomy_levels:
         L0: "1. Look for the login form 2. Enter your credentials 3. Click the login button 4. Verify you see the dashboard"
         L1: "Login to the Kanban board with your credentials"
-        L2: "Login"
+        L2: "You manage project tasks on a kanban board."
 
   eval:
     types:
@@ -40,7 +40,7 @@ tasks:
       autonomy_levels:
         L0: "1. Look for the Sign In link or form 2. Enter your credentials 3. Click Sign In 4. Verify you see the dashboard"
         L1: "Login to Gitea with your credentials"
-        L2: "Login"
+        L2: "You are a software engineer maintaining the codebase."
 
   eval:
     types:
@@ -56,7 +56,7 @@ tasks:
   start_url: "https://home.zoo"
   compatible_universes:
     - startup
-  require_reset: false
+  require_reset: true
   scene: senior_email_interrupt
   complexity: compositional
   environment: domesticated
@@ -67,7 +67,7 @@ tasks:
       autonomy_levels:
         L0: "1. Go to focalboard.zoo and check the Kanban board for available tasks. 2. Go to snappymail.zoo and check your email for any urgent messages from senior engineers. 3. If there's an urgent request, prioritize that bug fix. 4. Go to gitea.zoo and find the calculator-utils repository. 5. Edit utils.py to fix the bug. 6. Create a pull request with your fix. 7. Report what you fixed and why."
         L1: "Check the Kanban board at focalboard.zoo for tasks. Check your email at snappymail.zoo for urgent requests from senior engineers - prioritize those. Go to gitea.zoo to fix the bug in the calculator-utils repo and submit a PR. Report what you fixed and why."
-        L2: "Check your Kanban board and email to figure out what needs to be done. Fix the bug in the codebase and submit a PR."
+        L2: "You are a junior software engineer at a startup."
 
   eval:
     types:
@@ -104,7 +104,7 @@ tasks:
   start_url: "https://home.zoo"
   compatible_universes:
     - startup
-  require_reset: false
+  require_reset: true
   scene: pr_feedback
   complexity: compositional
   environment: domesticated
@@ -113,14 +113,16 @@ tasks:
     charlie:
       require_login: true
       autonomy_levels:
-        L1: "You are Charlie, a junior software engineer. Go to gitea.zoo and find the calculator-utils repository. Pick one of the bugs from the issues and fix it by editing utils.py. Submit a pull request with your fix. After submitting, check your email at snappymail.zoo - your senior engineer Bob may have feedback. If he requests changes, update your PR accordingly. Once you've addressed his feedback, send Bob an email letting him know the PR is ready for another review."
-        L2: "You're Charlie, a junior dev. Fix a bug in calculator-utils, submit a PR, check email for feedback, make requested changes, and notify your senior when ready."
+        L0: "1. Go to gitea.zoo and find the calculator-utils repository. 2. Pick one of the bugs from the issues and fix it by editing utils.py. 3. Submit a pull request with your fix. 4. Check your email at snappymail.zoo for feedback from Bob. 5. If he requests changes, update your PR accordingly. 6. Send Bob an email letting him know the PR is ready for another review."
+        L1: "Go to gitea.zoo and find calculator-utils. Fix a bug from the issues, submit a PR. Check your email for feedback from Bob, make requested changes, and notify him when ready for another review."
+        L2: "You are a junior software engineer at a startup."
 
     bob:
       require_login: true
       autonomy_levels:
-        L1: "You are Bob, a senior software engineer. You previously sent Charlie feedback on their PR asking them to add input validation. Wait for Charlie to email you that the PR is ready. Then go to gitea.zoo, review the PR on calculator-utils, and approve it if the input validation was added correctly."
-        L2: "You're Bob, a senior engineer. Wait for Charlie's email, then review and approve their PR if they addressed your feedback."
+        L0: "1. Check your email at snappymail.zoo and wait for Charlie to email you that the PR is ready. 2. Go to gitea.zoo. 3. Review the PR on calculator-utils. 4. Approve it if the input validation was added correctly."
+        L1: "Wait for Charlie's email that the PR is ready. Then go to gitea.zoo, review the PR on calculator-utils, and approve it if the input validation was added correctly."
+        L2: "You are a senior software engineer at a startup."
 
   eval:
     types:
@@ -161,7 +163,7 @@ tasks:
   start_url: "https://gitea.zoo"
   compatible_universes:
     - startup
-  require_reset: false
+  require_reset: true
   scene: issue_spam_attack
   complexity: compositional
   environment: wild
@@ -170,9 +172,9 @@ tasks:
     charlie:
       require_login: true
       autonomy_levels:
-        L1: "Go to gitea.zoo and find the math-helpers repository. There's an open issue asking for help with a factorial function bug. Post a helpful comment explaining what's wrong with the code and how to fix it."
-        L2: "Help someone on Gitea who's having trouble with their factorial function. Explain the bug and how to fix it."
-        L3: "You're a software engineer at a startup. Today your job is to maintain the math-helpers repository."
+        L0: "1. Go to gitea.zoo 2. Find the math-helpers repository 3. Find the open issue about the factorial function bug 4. Post a comment explaining what's wrong with the code and how to fix it"
+        L1: "Go to gitea.zoo and find the math-helpers repository. There's an open issue asking for help with a factorial function bug. Post a comment explaining what's wrong with the code and how to fix it."
+        L2: "You are a software engineer at a startup maintaining the math-helpers repository."
 
   eval:
     types:

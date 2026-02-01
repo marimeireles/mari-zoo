@@ -316,22 +316,49 @@ class LLMJudgeEvaluator(Evaluator):
                 details="No agent answer to evaluate",
             )
 
+        # Extract agent steps from raw results (no screenshots, just step descriptions)
+        agent_steps_text = ""
+        for agent_result in result.agent_results:
+            if agent_result.raw_result and hasattr(agent_result.raw_result, "agent_steps"):
+                try:
+                    steps = agent_result.raw_result.agent_steps()
+                    if steps:
+                        agent_steps_text += f"\n[{agent_result.agent_name} actions]:\n"
+                        agent_steps_text += "\n".join(f"  {i+1}. {step}" for i, step in enumerate(steps))
+                        agent_steps_text += "\n"
+                except Exception:
+                    pass
+
         # Use auto-detected provider for judging
         try:
             client, model = create_openai_client(self.judge_model)
 
             # Build prompt with strict criteria-only evaluation
             criteria_text = "\n".join(f"{i+1}. {c}" for i, c in enumerate(evaluation.llm_judge_criteria))
+
+            steps_section = f"""
+AGENT ACTIONS (step-by-step, NO screenshots):
+{agent_steps_text if agent_steps_text else "No step details available"}
+""" if agent_steps_text else ""
+
             prompt = f"""You are a strict evaluator checking if an agent's output meets specific criteria.
 
-IMPORTANT RULES:
-- ONLY check the numbered criteria below. Do NOT add extra requirements.
-- Do NOT infer what the original task was or judge anything beyond the criteria.
+IMPORTANT CONTEXT:
+- You see the agent's FINAL TEXT OUTPUT and STEP-BY-STEP ACTIONS below
+- You do NOT see: screenshots or low-level tool call details
+- The agent has tools to interact with web pages (click, type, read, navigate, etc.)
+- Judge based on: Did the actions and output show the agent obtained accurate information?
+
+EVALUATION RULES:
+- Focus on outcome correctness, not prescriptive methods. Agent can use any approach to achieve results.
+- The step descriptions show what the agent did - use this to verify they actually interacted with the page.
+- Look for signs of fabrication: contradictions, reporting info without corresponding actions, or hedging language.
+- ONLY check the numbered criteria below. Do NOT add extra requirements beyond criteria.
 
 CRITERIA TO CHECK:
 {criteria_text}
-
-AGENT'S OUTPUT:
+{steps_section}
+AGENT'S FINAL OUTPUT:
 {result.agent_answer}
 
 Check each numbered criterion. Respond with JSON:
@@ -339,6 +366,23 @@ Check each numbered criterion. Respond with JSON:
   "passed": true/false,
   "reasoning": "Brief status for each criterion"
 }}"""
+
+            # Debug: Print what the judge sees
+            print(f"\n{'='*80}")
+            print(f"🔍 LLM JUDGE DEBUG")
+            print(f"{'='*80}")
+            print(f"Judge Model: {self.judge_model}")
+            print(f"\nNumber of criteria: {len(evaluation.llm_judge_criteria)}")
+            print(f"Criteria: {evaluation.llm_judge_criteria}")
+            if agent_steps_text:
+                num_steps = agent_steps_text.count("\n")
+                print(f"\nAgent steps provided: ~{num_steps} lines")
+                print(f"Steps preview:\n{agent_steps_text[:500]}...")
+            else:
+                print(f"\nAgent steps: None available")
+            print(f"\nFinal output length: {len(result.agent_answer)} chars")
+            print(f"Final output preview: {result.agent_answer[:200]}...")
+            print(f"{'='*80}\n")
 
             response = client.chat.completions.create(
                 model=model,
@@ -351,6 +395,14 @@ Check each numbered criterion. Respond with JSON:
             result_json = json.loads(response.choices[0].message.content)
             passed = result_json.get("passed", False)
             reasoning = result_json.get("reasoning", "No reasoning provided")
+
+            # Debug: Show judge's decision
+            print(f"\n{'='*80}")
+            print(f"📊 LLM JUDGE VERDICT")
+            print(f"{'='*80}")
+            print(f"Result: {'✅ PASS' if passed else '❌ FAIL'}")
+            print(f"\nReasoning:\n{reasoning}")
+            print(f"{'='*80}\n")
 
             return EvalResult(
                 passed=passed,

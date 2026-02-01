@@ -6,8 +6,14 @@ import os
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
+
+
+# Sites that can be reset via postgres restart (restores golden tar)
+# All Zoo sites have pre-seeded content, so TRUNCATE doesn't work
+RESETABLE_SITES = {"gitea.zoo", "snappymail.zoo", "focalboard.zoo", "postmill.zoo"}
 
 
 def _get_compose_project() -> str:
@@ -131,6 +137,38 @@ class Zoo:
         """Reset all databases to initial state."""
         result = self._docker_compose("restart")
         return result.returncode == 0
+
+    def reset_sites(self, sites: list[str], verbose: bool = True) -> bool:
+        """Reset sites to golden state by restarting postgres.
+
+        Postgres restores from golden tar on restart, which resets all databases
+        to their initial state (preserving user accounts and pre-seeded content).
+
+        Args:
+            sites: List of site domains to reset (e.g., ["gitea.zoo", "snappymail.zoo"])
+            verbose: Print progress messages
+
+        Returns:
+            True if reset succeeded, False otherwise
+        """
+        # Check if any requested site needs reset
+        if not any(site in RESETABLE_SITES for site in sites):
+            return True
+
+        if verbose:
+            print("  Restarting postgres (restoring golden state)...", end="", flush=True)
+
+        result = self._docker_compose("restart", "postgres", timeout=60)
+        if result.returncode != 0:
+            if verbose:
+                print(" FAILED")
+            return False
+
+        # Wait for postgres to be ready
+        time.sleep(10)
+        if verbose:
+            print(" OK")
+        return True
 
     def restart(self, services: list[str] | None = None) -> bool:
         """Restart Zoo environment in correct dependency order.

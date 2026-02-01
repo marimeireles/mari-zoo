@@ -15,6 +15,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from browser_use.agent.views import AgentSettings
+
 from .base_agent_runner import BaseAgentRunner
 from .models import AgentResult, RunConfig, Task, TaskAgentConfig, TaskResult, Universe
 from .scenes import SceneManager
@@ -75,6 +77,7 @@ def _aggregate_agent_results(
         agent_answer=combined_answer if combined_answer else None,
         final_url=last_result.final_url if last_result else None,
         page_content=last_result.page_content if last_result else None,
+        error=None,
         steps=total_steps,
         duration_seconds=total_duration,
         raw_result=last_result.raw_result if last_result else None,
@@ -146,6 +149,7 @@ class BrowserUseRunner(BaseAgentRunner):
                 llm=self._get_llm(agent_config),
                 browser=browser,
                 extend_system_message=agent_context,
+                settings=AgentSettings(use_judge=False),
             )
 
             step_hook, last_page_html = _create_step_hook(browser)
@@ -180,6 +184,7 @@ class BrowserUseRunner(BaseAgentRunner):
                 answer=agent_answer,
                 final_url=last_page_html['url'],
                 page_content=last_page_html['html'],
+                error=None,
                 steps=len(result.history) if result and hasattr(result, "history") else 0,
                 duration_seconds=time.time() - start_time,
                 raw_result=result,
@@ -227,6 +232,7 @@ class BrowserUseRunner(BaseAgentRunner):
                         llm=self._get_llm(agent_config),
                         browser=browser,
                         extend_system_message=agent_context,
+                        settings=AgentSettings(use_judge=False),
                     )
 
                     step_hook, last_page_html = _create_step_hook(browser)
@@ -262,6 +268,7 @@ class BrowserUseRunner(BaseAgentRunner):
                         answer=agent_answer,
                         final_url=last_page_html['url'],
                         page_content=last_page_html['html'],
+                        error=None,
                         steps=len(result.history) if result and hasattr(result, "history") else 0,
                         duration_seconds=time.time() - start_time,
                         raw_result=result,
@@ -292,9 +299,7 @@ class BrowserUseRunner(BaseAgentRunner):
         self, tasks: list[Task]
     ) -> list[TaskResult]:
         """Run tasks with their defined agents."""
-        # Reset only if explicitly requested by a task
-        if any(t.require_reset for t in tasks):
-            self.zoo.reset_databases()
+        # Note: Per-level reset happens automatically for tasks with scenes
 
         all_results = []
 
@@ -304,75 +309,66 @@ class BrowserUseRunner(BaseAgentRunner):
                 continue
 
             start_url = self.zoo.resolve_url(task.start_url)
-            task_start_time = time.time()
+            agents = list(task.agents.values())
 
-            # Set up scene manager (runs setup scripts before browser starts)
-            # NOTE: Scene state persists across autonomy levels. This means:
-            # - Setup scripts (e.g., seeding emails) run once
-            # - L0 sees fresh state, L1/L2 see accumulated state (e.g., emails marked as read)
-            # - If you need isolated state per level, run levels separately with --level
-            scene_manager = None
-            if task.scene_name:
-                from .models import load_scene
-
-                # Load scene first to check if it needs proxy events
-                scenes_dir = self.universe_path / "scenes" if self.universe_path else None
-                scene_path = scenes_dir / f"{task.scene_name}.yaml" if scenes_dir else None
-                scene = load_scene(scene_path) if scene_path and scene_path.exists() else None
-
-                # Auto-enable proxy events if scene has request triggers
-                use_proxy = self.config.use_proxy_events or (scene and scene.needs_proxy_events)
-                event_source = None
-                if use_proxy:
-                    from .proxy_event_source import ProxyEventSource
-                    session_id = str(uuid.uuid4())
-                    event_source = ProxyEventSource(
-                        redis_url=self.config.redis_url,
-                        session_id=session_id,
-                    )
-
-                universe_sites = self.universe.sites if self.universe else []
-                scene_manager = SceneManager(
-                    self.zoo,
-                    self.universe_path,
-                    universe_sites,
-                    event_source=event_source,
+            # Determine which autonomy levels to run for this task
+            levels_to_run = []
+            for autonomy_level in self.config.autonomy_levels:
+                if (task.task_id, autonomy_level) in self.config.completed_pairs:
+                    print(f"  Skipping task {task.task_id} {autonomy_level} (already completed)")
+                    continue
+                has_level = any(
+                    autonomy_level in agent_config.autonomy_levels
+                    for agent_config in agents
                 )
-                await scene_manager.load_and_setup(task.scene_name)
-                scene_manager.start_time = task_start_time
+                if has_level:
+                    levels_to_run.append(autonomy_level)
 
-                # Set up triggers (poll, time, request, etc.)
-                await scene_manager.setup_triggers()
+            # Run each autonomy level with fresh state
+            for level_idx, autonomy_level in enumerate(levels_to_run):
+                # Auto-reset if task requires it or has a scene (scenes modify DB state)
+                if (task.require_reset or task.scene_name) and self.universe:
+                    sites_to_reset = task.sites if task.sites else self.universe.sites
+                    self.zoo.reset_sites(sites_to_reset)
 
-            try:
-                # Get agents list from task
-                agents = list(task.agents.values())
+                task_start_time = time.time()
 
-                # Run each task with configured autonomy levels
-                for autonomy_level in self.config.autonomy_levels:
-                    # Skip if this (task_id, level) was already completed (for resume)
-                    if (task.task_id, autonomy_level) in self.config.completed_pairs:
-                        print(f"  Skipping task {task.task_id} {autonomy_level} (already completed)")
-                        continue
+                # Set up scene manager for this autonomy level
+                scene_manager = None
+                if task.scene_name:
+                    from .models import load_scene
 
-                    # Skip if no agent has this autonomy level defined
-                    has_level = any(
-                        autonomy_level in agent_config.autonomy_levels
-                        for agent_config in agents
+                    scenes_dir = self.universe_path / "scenes" if self.universe_path else None
+                    scene_path = scenes_dir / f"{task.scene_name}.yaml" if scenes_dir else None
+                    scene = load_scene(scene_path) if scene_path and scene_path.exists() else None
+
+                    use_proxy = self.config.use_proxy_events or (scene and scene.needs_proxy_events)
+                    event_source = None
+                    if use_proxy:
+                        from .proxy_event_source import ProxyEventSource
+                        session_id = str(uuid.uuid4())
+                        event_source = ProxyEventSource(
+                            redis_url=self.config.redis_url,
+                            session_id=session_id,
+                        )
+
+                    universe_sites = self.universe.sites if self.universe else []
+                    scene_manager = SceneManager(
+                        self.zoo,
+                        self.universe_path,
+                        universe_sites,
+                        event_source=event_source,
                     )
-                    if not has_level:
-                        continue
+                    await scene_manager.load_and_setup(task.scene_name)
+                    scene_manager.start_time = task_start_time
+                    await scene_manager.setup_triggers()
 
+                try:
                     if self.config.shared_browser:
-                        # Shared browser: run agents sequentially in same browser
                         result = await self._run_shared_browser_task(agents, task, start_url, autonomy_level)
                         all_results.append(result)
                     else:
-                        # Separate browsers: run each agent in its own browser concurrently
-                        # SceneManager handles trigger logic for agents
-
                         async def run_agent(agent_config: TaskAgentConfig) -> AgentResult:
-                            # SceneManager decides when agent should start (immediate or after trigger)
                             if scene_manager:
                                 should_start = await scene_manager.wait_for_agent_start(agent_config.name)
                                 if not should_start:
@@ -388,12 +384,11 @@ class BrowserUseRunner(BaseAgentRunner):
                         agent_results = await asyncio.gather(*[run_agent(a) for a in agents])
                         task_result = _aggregate_agent_results(list(agent_results), task.task_id, autonomy_level)
                         all_results.append(task_result)
-            finally:
-                # Clean up scene manager after all autonomy levels are done
-                if scene_manager:
-                    try:
-                        await scene_manager.cleanup()
-                    except Exception:
-                        pass
+                finally:
+                    if scene_manager:
+                        try:
+                            await scene_manager.cleanup()
+                        except Exception:
+                            pass
 
         return all_results

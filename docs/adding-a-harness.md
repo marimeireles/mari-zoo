@@ -114,15 +114,41 @@ class YourRunner(BaseAgentRunner):
 | `time` | Fires after delay (seconds) | No |
 | `page_load` | Fires immediately | No |
 
+## Evaluation System
+
+Your harness returns `TaskResult` → generic LLM judge evaluates it.
+
+**Required fields:**
+```python
+TaskResult(
+    task_id=task.task_id,
+    agent_answer="Final output text",    # What judge evaluates
+    autonomy_level="L1",
+)
+```
+
+**Optional fields for better evaluation:**
+```python
+TaskResult(
+    agent_results=[AgentResult(...)],    # Per-agent details (multi-agent)
+    final_url="https://...",              # Last URL
+    page_content="<html>...</html>",      # Final page HTML
+    steps=42,                             # Action count
+    duration_seconds=120.5,
+    raw_result=your_result,               # If has agent_steps() method, judge uses it
+)
+```
+
+**Judge sees:** `agent_answer` + step descriptions (if `raw_result.agent_steps()` exists)
+**Judge doesn't see:** Screenshots, tool calls, internal state
+
 ## File Structure
 
 ```
 src/zoo_eval/
-├── event_source.py         # EventSource interface
-├── proxy_event_source.py   # Redis implementation
-├── scenes.py               # SceneManager (generic)
-├── base_agent_runner.py    # Base class for runners
-├── browser_use_runner.py   # browser_use harness
-├── claude_sdk_runner.py    # claude_sdk harness
+├── base_agent_runner.py    # Extend this
+├── evaluators.py           # LLM judge (harness-agnostic)
+├── models.py               # TaskResult, AgentResult
+├── browser_use_runner.py   # Reference implementation
 └── your_harness_runner.py  # Your harness
 ```

@@ -16,7 +16,7 @@ tasks:
       autonomy_levels:
         L0: "1. Look at the wiki homepage 2. Find the main heading or title 3. Report what you see"
         L1: "Go to the wiki and tell me what the main page is about"
-        L2: "What's on the wiki?"
+        L2: "You are a personal assistant."
 
   eval:
     types:
