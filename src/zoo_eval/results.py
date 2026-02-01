@@ -128,7 +128,7 @@ class ResultsDB:
     def get_completed_task_ids(self, run_id: int) -> set[int]:
         """Get set of task IDs that have already been completed in a run.
 
-        A task is considered complete only if all autonomy levels (L0, L1, L2, L3)
+        A task is considered complete only if all autonomy levels (L0, L1, L2)
         have been run, or if at least one result exists for old-format runs.
         """
         rows = self.conn.execute(

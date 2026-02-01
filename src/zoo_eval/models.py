@@ -11,7 +11,7 @@ from typing import Any
 import yaml
 
 # Shared constants for autonomy levels, environments, and complexities
-AUTONOMY_LEVELS = ["L0", "L1", "L2", "L3"]
+AUTONOMY_LEVELS = ["L0", "L1", "L2"]
 ENVIRONMENTS = ["domesticated", "tame", "wild"]
 COMPLEXITIES = ["atomic", "compositional", "open_ended"]
 

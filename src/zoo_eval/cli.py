@@ -75,7 +75,7 @@ def run(
     model: str = typer.Option("google/gemini-2.5-flash-lite", "--model", "-m", help="Agent model (auto-detects: '/' → OpenRouter, else OpenAI). Aliases: flash, sonnet"),
     judge_model: str = typer.Option(None, "--judge-model", "-j", help="LLM judge model (default: gpt-5.1, auto-detects provider like --model)"),
     shared_browser: bool = typer.Option(False, "--shared-browser", help="All agents share same browser and memory"),
-    level: list[str] = typer.Option(None, "--level", "-L", help="Autonomy level(s) to run: L0, L1, L2, L3 (can specify multiple, default: all)"),
+    level: list[str] = typer.Option(None, "--level", "-L", help="Autonomy level(s) to run: L0, L1, L2 (can specify multiple, default: all)"),
     harness: str = typer.Option("browser_use", "--harness", "-H", help="Agent harness to use"),
     claude_model: str = typer.Option("sonnet", "--claude-model", help="Claude model for claude_sdk harness: opus, sonnet, haiku"),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
@@ -383,7 +383,7 @@ def benchmark(
     headless: bool = typer.Option(True, help="Run browser headlessly"),
     max_steps: int = typer.Option(30, help="Max steps per task"),
     timeout: int = typer.Option(120, help="Timeout in seconds per task"),
-    level: list[str] = typer.Option(None, "--level", "-L", help="Autonomy level(s): L0, L1, L2, L3"),
+    level: list[str] = typer.Option(None, "--level", "-L", help="Autonomy level(s): L0, L1, L2"),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
 ):

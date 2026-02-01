@@ -177,7 +177,7 @@ class BenchmarkMetrics:
 
     # By autonomy level
     by_autonomy_level: dict[str, dict[str, Any]]
-    autonomy_score: float  # (1×CR_L0 + 2×CR_L1 + 3×CR_L2 + 4×CR_L3) / 10
+    autonomy_score: float  # (1×CR_L0 + 2×CR_L1 + 3×CR_L2) / 6
 
     # By environment
     by_environment: dict[str, dict[str, Any]]
@@ -253,15 +253,15 @@ def compute_metrics(
         "SELECT started_at, finished_at FROM runs WHERE id = ?", (run_id,)
     ).fetchone()
 
-    # Autonomy Score = (1×CR_L0 + 2×CR_L1 + 3×CR_L2 + 4×CR_L3) / 10
+    # Autonomy Score = (1×CR_L0 + 2×CR_L1 + 3×CR_L2) / 6
     by_level = stats.get("by_level", {})
-    weights = {"L0": 1, "L1": 2, "L2": 3, "L3": 4}
+    weights = {"L0": 1, "L1": 2, "L2": 3}
     weighted_sum = 0.0
     for level, weight in weights.items():
         level_data = by_level.get(level, {})
         completion_rate = level_data.get("completion_rate", 0) / 100
         weighted_sum += weight * completion_rate
-    autonomy_score = weighted_sum / 10
+    autonomy_score = weighted_sum / 6
 
     # Environment Resilience = wild_score / domesticated_score
     by_env = stats.get("by_environment", {})

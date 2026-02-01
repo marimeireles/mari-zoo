@@ -41,7 +41,7 @@ tasks:
       autonomy_levels:
         L0: "1. Add email and password 2. Login 3. Check inbox 4. Find email about Q4 budget 5. Report sender name"
         L1: "Check your email inbox for messages about Q4 budget and report who sent it"
-        L2: "Tell me who's been emailing about the quarterly budget"
+        L2: "You manage your email inbox."
 
   # Evaluation
   eval:
@@ -64,7 +64,10 @@ tasks:
 
 **Agent Fields** (nested under `agents.<agent_name>`):
 - `require_login`: Whether login is needed (credentials auto-populated from `credentials/` files)
-- `autonomy_levels`: Dict of L0/L1/L2/L3 instruction variants
+- `autonomy_levels`: Dict of L0/L1/L2 instruction variants:
+  - **L0**: Step-by-step instructions (e.g., "1. Go to... 2. Find... 3. Do...")
+  - **L1**: Task description (what to do, not step-by-step)
+  - **L2**: Identity/persona (who you are, contextual to the task)
 - `start_trigger`: Optional trigger that delays agent start
 
 **Benchmark Fields:**
