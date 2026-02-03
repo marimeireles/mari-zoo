@@ -3,7 +3,7 @@ tasks:
   sites:
     - focalboard.zoo
   intent: "Login to Kanban board"
-  start_url: "http://focalboard.zoo"
+  start_url: "https://focalboard.zoo"
   compatible_universes:
     - startup
   require_reset: false
@@ -16,7 +16,6 @@ tasks:
       autonomy_levels:
         L0: "1. Look for the login form 2. Enter your credentials 3. Click the login button 4. Verify you see the dashboard"
         L1: "Login to the Kanban board with your credentials"
-        L2: "You manage project tasks on a kanban board."
 
   eval:
     types:
@@ -40,7 +39,6 @@ tasks:
       autonomy_levels:
         L0: "1. Look for the Sign In link or form 2. Enter your credentials 3. Click Sign In 4. Verify you see the dashboard"
         L1: "Login to Gitea with your credentials"
-        L2: "You are a software engineer maintaining the codebase."
 
   eval:
     types:

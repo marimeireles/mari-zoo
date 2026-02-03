@@ -11,7 +11,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .benchmark import BenchmarkConfig, create_log_dir, run_benchmark
+from .benchmark import BenchmarkConfig, create_log_dir, run_benchmark, _extract_harness_details
 from .models import AUTONOMY_LEVELS, AgentHarness, RunConfig, load_tasks, load_universe
 from .results import ResultsDB, print_report
 from .runner import TaskRunner
@@ -238,6 +238,21 @@ def run(
     )
     runner = TaskRunner(zoo, run_config, universe_path, universe_obj)
 
+    # Initialize log file
+    log_file = log_dir / "run.log"
+    from datetime import datetime
+    with open(log_file, "w") as f:
+        f.write(f"Run #{run_id}\n")
+        f.write(f"Universe: {universe_obj.name}\n")
+        f.write(f"Task file: {task_file_name}\n")
+        f.write(f"Model: {model_info}\n")
+        f.write(f"Harness: {harness}\n")
+        f.write(f"Levels: {levels_str}\n")
+        f.write(f"Tasks: {len(tasks)}\n")
+        f.write(f"Started: {datetime.now().isoformat()}\n")
+        f.write("-" * 50 + "\n")
+        f.flush()
+
     async def execute():
         await runner.setup()
         try:
@@ -262,6 +277,40 @@ def run(
                 console.print(
                     f"  Task {result.task.task_id} ({level}): {status}{subtask_info} ({result.task_result.duration_seconds:.1f}s)"
                 )
+                # Log to file in real-time
+                with open(log_file, "a") as f:
+                    status_char = "✓" if score >= 1.0 else "✗"
+                    tr = result.task_result
+                    f.write(f"{status_char} Task {result.task.task_id} ({level}): {score:.2f} | {tr.steps} steps | {tr.duration_seconds:.1f}s\n")
+                    # Log agent details with full harness output
+                    for ar in tr.agent_results:
+                        f.write(f"  Agent {ar.agent_name}: {ar.steps} steps, {ar.duration_seconds:.1f}s\n")
+                        if ar.answer:
+                            f.write(f"    Final Answer:\n")
+                            for line in ar.answer.split('\n'):
+                                f.write(f"      {line}\n")
+                        if ar.error:
+                            f.write(f"    Error: {ar.error}\n")
+                        # Extract and log full harness details
+                        harness_details = _extract_harness_details(ar)
+                        if harness_details:
+                            f.write(f"    --- Harness Details ---\n")
+                            for line in harness_details.split('\n'):
+                                f.write(f"      {line}\n")
+                    # Log subtask results with judge reasoning
+                    if subtasks:
+                        f.write(f"  --- Evaluation Results ---\n")
+                        for sr in subtasks:
+                            sr_status = "✓" if sr.passed else "✗"
+                            f.write(f"  {sr_status} {sr.subtask_id}: {sr.description}\n")
+                            if sr.evidence:
+                                f.write(f"    Judge reasoning:\n")
+                                for line in sr.evidence.split('\n'):
+                                    f.write(f"      {line}\n")
+                    if tr.error:
+                        f.write(f"  Task Error: {tr.error}\n")
+                    f.write("\n" + "-" * 60 + "\n")
+                    f.flush()
         finally:
             await runner.teardown()
 
@@ -286,7 +335,17 @@ def run(
     }
     with open(log_dir / "results.json", "w") as f:
         json.dump(log_data, f, indent=2)
-    console.print(f"[green]Results saved to {log_dir}/results.json[/green]")
+
+    # Write final summary to log
+    with open(log_file, "a") as f:
+        f.write("\n" + "=" * 50 + "\n")
+        f.write(f"Finished: {datetime.now().isoformat()}\n")
+        f.write(f"Completed: {run_stats['completed']}/{run_stats['total']}\n")
+        f.write(f"Score: {run_stats['avg_score']:.2f}\n")
+        f.write(f"Completion rate: {run_stats['completion_rate']:.1f}%\n")
+        f.flush()
+
+    console.print(f"[green]Results saved to {log_dir}[/green]")
 
     db.close()
 

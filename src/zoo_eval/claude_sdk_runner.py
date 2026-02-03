@@ -226,7 +226,7 @@ class ClaudeSDKRunner(BaseAgentRunner):
                 # Auto-reset if task requires it or has a scene (scenes modify DB state)
                 if (task.require_reset or task.scene_name) and self.universe:
                     sites_to_reset = task.sites if task.sites else self.universe.sites
-                    self.zoo.reset_sites(sites_to_reset)
+                    self.zoo.reset_sites_fast(sites_to_reset)
 
                 task_start_time = time.time()
 

@@ -16,6 +16,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+# Suppress macOS MallocStackLogging warning from Chromium subprocesses
+os.environ["MallocStackLogging"] = "0"
+
 from .base_agent_runner import BaseAgentRunner
 from .models import AgentResult, RunConfig, Task, TaskAgentConfig, TaskResult, Universe
 from .scenes import SceneManager
@@ -23,11 +26,18 @@ from .zoo import Zoo
 
 
 
-def _create_step_hook(browser):
+class AgentTimeoutError(Exception):
+    """Raised when agent exceeds the allowed timeout."""
+    pass
+
+
+def _create_step_hook(browser, start_time: float | None = None, timeout_seconds: float | None = None):
     """Create a step hook that captures page HTML after each agent step.
 
     Args:
         browser: browser_use Browser instance
+        start_time: Optional start time for timeout checking
+        timeout_seconds: Optional timeout in seconds
 
     Returns:
         Tuple of (step_hook function, last_page_html dict for retrieving captured data)
@@ -35,6 +45,12 @@ def _create_step_hook(browser):
     last_page_html = {'html': None, 'url': None}
 
     async def step_hook(agent_instance):
+        # Check timeout first - this ensures we stop even if browser-use ignores asyncio cancellation
+        if start_time is not None and timeout_seconds is not None:
+            elapsed = time.time() - start_time
+            if elapsed > timeout_seconds:
+                raise AgentTimeoutError(f"Agent exceeded timeout of {timeout_seconds}s (elapsed: {elapsed:.1f}s)")
+
         # Capture page HTML after each step
         try:
             cdp_session = await agent_instance.browser_session.get_or_create_cdp_session()
@@ -53,8 +69,10 @@ def _create_step_hook(browser):
             page = await browser.get_current_page()
             if page:
                 last_page_html['url'] = page.url
+        except AgentTimeoutError:
+            raise  # Re-raise timeout errors
         except Exception:
-            pass  # Silently fail - we'll still have previous capture or None
+            pass  # Silently fail other errors - we'll still have previous capture or None
 
     return step_hook, last_page_html
 
@@ -151,14 +169,16 @@ class BrowserUseRunner(BaseAgentRunner):
                 use_judge=False,
             )
 
-            step_hook, last_page_html = _create_step_hook(browser)
+            step_hook, last_page_html = _create_step_hook(
+                browser, start_time=start_time, timeout_seconds=self.config.timeout_seconds
+            )
 
             try:
                 result = await asyncio.wait_for(
                     agent.run(max_steps=self.config.max_steps, on_step_end=step_hook),
                     timeout=self.config.timeout_seconds,
                 )
-            except asyncio.TimeoutError:
+            except (asyncio.TimeoutError, AgentTimeoutError) as e:
                 return AgentResult(
                     agent_name=agent_config.name,
                     agent_role="",
@@ -234,14 +254,16 @@ class BrowserUseRunner(BaseAgentRunner):
                         use_judge=False,
                     )
 
-                    step_hook, last_page_html = _create_step_hook(browser)
+                    step_hook, last_page_html = _create_step_hook(
+                        browser, start_time=start_time, timeout_seconds=self.config.timeout_seconds
+                    )
 
                     try:
                         result = await asyncio.wait_for(
                             agent.run(max_steps=self.config.max_steps, on_step_end=step_hook),
                             timeout=self.config.timeout_seconds,
                         )
-                    except asyncio.TimeoutError:
+                    except (asyncio.TimeoutError, AgentTimeoutError):
                         agent_results.append(AgentResult(
                             agent_name=agent_config.name,
                             agent_role="",
@@ -328,7 +350,21 @@ class BrowserUseRunner(BaseAgentRunner):
                 # Auto-reset if task requires it or has a scene (scenes modify DB state)
                 if (task.require_reset or task.scene_name) and self.universe:
                     sites_to_reset = task.sites if task.sites else self.universe.sites
-                    self.zoo.reset_sites(sites_to_reset)
+                    self.zoo.reset_sites_fast(sites_to_reset)
+
+                # Ensure task-specific sites are healthy before running
+                if task.sites:
+                    all_healthy, failed_sites = self.zoo.ensure_sites_healthy(task.sites)
+                    if not all_healthy:
+                        error_msg = f"Sites unhealthy after restart: {', '.join(failed_sites)}"
+                        print(f"  Task {task.task_id} {autonomy_level}: {error_msg}")
+                        all_results.append(TaskResult(
+                            task_id=task.task_id,
+                            agent_results=[],
+                            error=error_msg,
+                            autonomy_level=autonomy_level,
+                        ))
+                        continue
 
                 task_start_time = time.time()
 

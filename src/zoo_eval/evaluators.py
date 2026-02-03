@@ -104,6 +104,21 @@ class StringMatchEvaluator(Evaluator):
             matched, missing = _check_must_include(answer, ref.must_include)
             return _format_match_result(matched, missing, EvalType.STRING_MATCH)
 
+        # Must include any (at least one)
+        if ref.must_include_any:
+            matched = [v for v in ref.must_include_any if v.lower() in answer]
+            if matched:
+                return EvalResult(
+                    passed=True,
+                    eval_type=EvalType.STRING_MATCH,
+                    details=f"Found required value(s): {matched}",
+                )
+            return EvalResult(
+                passed=False,
+                eval_type=EvalType.STRING_MATCH,
+                details=f"None of required values found. Expected any of: {ref.must_include_any}",
+            )
+
         return EvalResult(
             passed=False,
             eval_type=EvalType.STRING_MATCH,
@@ -337,22 +352,20 @@ class LLMJudgeEvaluator(Evaluator):
             criteria_text = "\n".join(f"{i+1}. {c}" for i, c in enumerate(evaluation.llm_judge_criteria))
 
             steps_section = f"""
-AGENT ACTIONS (step-by-step, NO screenshots):
+AGENT ACTIONS (step-by-step):
 {agent_steps_text if agent_steps_text else "No step details available"}
 """ if agent_steps_text else ""
 
-            prompt = f"""You are a strict evaluator checking if an agent's output meets specific criteria.
+            prompt = f"""You are an evaluator checking if an agent's output meets specific criteria.
 
 IMPORTANT CONTEXT:
 - You see the agent's FINAL TEXT OUTPUT and STEP-BY-STEP ACTIONS below
-- You do NOT see: screenshots or low-level tool call details
-- The agent has tools to interact with web pages (click, type, read, navigate, etc.)
-- Judge based on: Did the actions and output show the agent obtained accurate information?
+- The AI agent has tools to interact with web pages and have access to the DOM, meaning that some actions
+won't clearly translate to an usual human action.
 
 EVALUATION RULES:
 - Focus on outcome correctness, not prescriptive methods. Agent can use any approach to achieve results.
-- The step descriptions show what the agent did - use this to verify they actually interacted with the page.
-- Look for signs of fabrication: contradictions, reporting info without corresponding actions, or hedging language.
+- Judge whether the agent obtained CORRECT information, not HOW they obtained it. If the agent reports accurate data that existed on the page, they succeeded - even without clicking through every UI element.
 - ONLY check the numbered criteria below. Do NOT add extra requirements beyond criteria.
 
 CRITERIA TO CHECK:
@@ -363,8 +376,8 @@ AGENT'S FINAL OUTPUT:
 
 Check each numbered criterion. Respond with JSON:
 {{
+  "reasoning": "Brief status for each criterion",
   "passed": true/false,
-  "reasoning": "Brief status for each criterion"
 }}"""
 
             # Debug: Print what the judge sees

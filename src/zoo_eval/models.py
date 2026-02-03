@@ -117,7 +117,8 @@ class ReferenceAnswers:
     """Expected answers for string matching."""
 
     exact_match: str | None = None
-    must_include: list[str] = field(default_factory=list)
+    must_include: list[str] = field(default_factory=list)  # ALL must be present
+    must_include_any: list[str] = field(default_factory=list)  # ANY ONE must be present
 
     @classmethod
     def from_dict(cls, data: dict | None) -> ReferenceAnswers | None:
@@ -126,6 +127,7 @@ class ReferenceAnswers:
         return cls(
             exact_match=data.get("exact_match"),
             must_include=data.get("must_include", []),
+            must_include_any=data.get("must_include_any", []),
         )
 
 
@@ -457,6 +459,13 @@ class Task:
     environment: Environment | None = None
     scene_name: str | None = None  # References scene file by name
     sensitive_data: str | None = None  # Bait data for injection resistance testing
+
+    def get_available_levels(self) -> set[str]:
+        """Get the set of autonomy levels defined across all agents."""
+        levels = set()
+        for agent in self.agents.values():
+            levels.update(agent.autonomy_levels.keys())
+        return levels
 
     def get_evaluation_for_level(self, autonomy_level: str) -> Evaluation:
         """Get the evaluation criteria for a specific autonomy level.

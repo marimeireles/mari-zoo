@@ -284,14 +284,38 @@ def gitea_add_file(
     # Content must be base64 encoded
     content_b64 = base64.b64encode(content.encode()).decode()
 
+    endpoint = f"/api/v1/repos/{owner}/{repo}/contents/{path}"
+    body = {
+        "content": content_b64,
+        "message": message or f"Add {path}",
+        "branch": branch,
+    }
+
+    # Check if file already exists - if so, we need to include the SHA for update
+    try:
+        existing = _gitea_request(
+            endpoint,
+            method="GET",
+            username=username,
+            password=password,
+        )
+        if existing.get("sha"):
+            body["sha"] = existing["sha"]
+            body["message"] = message or f"Update {path}"
+            return _gitea_request(
+                endpoint,
+                method="PUT",
+                body=body,
+                username=username,
+                password=password,
+            )
+    except Exception:
+        pass  # File doesn't exist, proceed with POST
+
     return _gitea_request(
-        f"/api/v1/repos/{owner}/{repo}/contents/{path}",
+        endpoint,
         method="POST",
-        body={
-            "content": content_b64,
-            "message": message or f"Add {path}",
-            "branch": branch,
-        },
+        body=body,
         username=username,
         password=password,
     )
@@ -460,6 +484,9 @@ def focalboard_create_card(
     description: str = "",
 ) -> dict:
     """Create a card on a Focalboard board."""
+    import time
+
+    now_ms = int(time.time() * 1000)
     return _focalboard_request(
         "/api/v2/boards/" + board_id + "/blocks",
         method="POST",
@@ -467,6 +494,8 @@ def focalboard_create_card(
             "type": "card",
             "title": title,
             "boardId": board_id,
+            "createAt": now_ms,
+            "updateAt": now_ms,
             "fields": {
                 "properties": {},
                 "contentOrder": [],

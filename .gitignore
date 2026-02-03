@@ -43,9 +43,14 @@ htmlcov/
 # Results
 results/
 traces/
+benchmark_results/
 *.log
 
 # Auth state (contains credentials)
 .auth/
 traces/
 *.db
+paper.tex
+references.bib
+logs/
+CLAUDE.md

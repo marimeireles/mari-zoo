@@ -1,8 +1,4 @@
 tasks:
-# =============================================================================
-# Long-Horizon Task: A Day at the Startup
-# All 4 agents work in parallel on their own responsibilities
-# =============================================================================
 
 - id: 401
   sites:
@@ -51,7 +47,6 @@ tasks:
     types:
       - llm_judge
     subtasks:
-      # === CHARLIE'S WORKSTREAM ===
       - id: charlie_checked_email
         description: "Charlie logged into snappymail.zoo and read Diana's email about sprint tasks"
         eval_type: llm_judge
@@ -64,7 +59,6 @@ tasks:
         description: "Charlie created a pull request with bug fixes for calculator-utils"
         eval_type: llm_judge
 
-      # === BOB'S WORKSTREAM ===
       - id: bob_checked_email
         description: "Bob logged into snappymail.zoo and read Diana's email about code review and metrics dashboard"
         eval_type: llm_judge
@@ -77,7 +71,6 @@ tasks:
         description: "Bob added a README to metrics-dashboard describing what metrics to track (could include: active users, signups, revenue, retention, etc.)"
         eval_type: llm_judge
 
-      # === ALICE'S WORKSTREAM ===
       - id: alice_checked_email
         description: "Alice logged into snappymail.zoo and read Diana's email about Q2 planning"
         eval_type: llm_judge
@@ -90,7 +83,6 @@ tasks:
         description: "Alice sent an email to Diana discussing investor pitch planning (metrics to highlight, presentation structure, or who presents what)"
         eval_type: llm_judge
 
-      # === DIANA'S WORKSTREAM ===
       - id: diana_checked_email
         description: "Diana logged into snappymail.zoo and read the marketing agency proposal from Jen Martinez"
         eval_type: llm_judge

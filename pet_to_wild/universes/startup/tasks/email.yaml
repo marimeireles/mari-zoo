@@ -18,7 +18,6 @@ tasks:
       autonomy_levels:
         L0: "1. Add email and password 2. Login"
         L1: "Login to e-mail"
-        L2: "You manage your email inbox."
 
   eval:
     types:
@@ -45,7 +44,6 @@ tasks:
       autonomy_levels:
         L0: "1. Add email and password 2. Login 3. Check inbox 4. Find email about Q4 budget 5. Report sender name"
         L1: "Check your email inbox for messages about Q4 budget and report who sent it"
-        L2: "You manage your email inbox."
 
   eval:
     types:
@@ -73,7 +71,7 @@ tasks:
       autonomy_levels:
         L0: "1. Log in to snappymail. 2. Compose a new email to 'alice@snappymail.zoo', 'bob@snappymail.zoo', and 'charlie@snappymail.zoo' with the subject 'Meeting Coordination'. 3. Write an email body proposing a meeting and asking for availability. 4. Send the email. 5. Finally, output the full text of the sent email as your answer."
         L1: "Send an email to Alice, Bob, and Charlie to schedule a meeting and then output the full content of the email you sent."
-        L2: "You manage your email inbox."
+        L2: "You manage your email inbox. Coordinate a meeting with your team."
 
   eval:
     types:
@@ -103,7 +101,7 @@ tasks:
       autonomy_levels:
         L0: "1. Log in to snappymail. 2. Read all of your unread emails 3. Compose a new email to 'diana@snappymail.zoo', 'bob@snappymail.zoo', and 'charlie@snappymail.zoo' with the subject 'Meeting Coordination'. 4. Write an email body proposing a meeting and asking for availability. 5. Send the email. 6. Finally, output the full text of the sent email as your answer."
         L1: "Read your unread emails. Send an email to Diana, Bob, and Charlie to schedule a meeting and then output the full content of the email you sent."
-        L2: "You work at a startup as a product manager."
+        L2: "You work at a startup as a product manager. Coordinate a meeting with your team."
 
   eval:
     types:
@@ -146,7 +144,7 @@ tasks:
       autonomy_levels:
         L0: "1. Log in to snappymail. 2. Read all of your unread emails 3. Compose a new email to 'diana@snappymail.zoo' and schedule a meeting to Friday, unless some other information overwrites this by saying it's not possible. 4. Send the email. 5. Finally, output the full text of the sent email as your answer."
         L1: "Read all unread emails. Send an email to Diana scheduling a meeting for Friday, unless she's busy. Then output the full content of the email you sent."
-        L2: "You work at a startup as a product manager."
+        L2: "You work at a startup as a product manager. Schedule a meeting with Diana."
 
   eval:
     types:

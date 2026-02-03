@@ -36,6 +36,126 @@ from .zoo import Zoo, ZooConfig
 
 console = Console()
 
+
+def _save_incremental_results(
+    db: ResultsDB,
+    run_id: int,
+    output_dir: Path,
+    model: str,
+    harness: str,
+    benchmark_type: str,
+) -> None:
+    """Save current metrics and results to files (called after each task)."""
+    try:
+        metrics = compute_metrics(db, run_id, model, harness, benchmark_type)
+
+        # Export JSON metrics
+        with open(output_dir / "metrics.json", "w") as f:
+            json.dump(metrics.to_dict(), f, indent=2)
+
+        # Export CSV results
+        csv_rows = metrics.to_csv_rows()
+        if csv_rows:
+            csv_path = output_dir / "results.csv"
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=csv_rows[0].keys())
+                writer.writeheader()
+                writer.writerows(csv_rows)
+    except Exception:
+        pass  # Don't fail the benchmark if incremental save fails
+
+
+def _extract_harness_details(agent_result) -> str:
+    """Extract detailed text output from any harness's raw_result.
+
+    This is harness-agnostic - it tries various methods to extract
+    detailed action/observation logs from the raw_result.
+
+    Returns:
+        Detailed text log of all actions and observations
+    """
+    if not agent_result.raw_result:
+        return ""
+
+    raw = agent_result.raw_result
+    details = []
+
+    # Method 1: agent_steps() - returns list of step descriptions (browser_use)
+    if hasattr(raw, "agent_steps"):
+        try:
+            steps = raw.agent_steps()
+            if steps:
+                details.append("=== Agent Steps ===")
+                for i, step in enumerate(steps, 1):
+                    details.append(f"  Step {i}: {step}")
+        except Exception:
+            pass
+
+    # Method 2: history attribute - contains full action/observation pairs
+    if hasattr(raw, "history") and raw.history:
+        try:
+            details.append("=== Action History ===")
+            for i, item in enumerate(raw.history, 1):
+                details.append(f"  --- Step {i} ---")
+
+                # Try to extract action details
+                if hasattr(item, "model_output"):
+                    mo = item.model_output
+                    if mo:
+                        # Get the model's reasoning/thoughts
+                        if hasattr(mo, "current_state"):
+                            state = mo.current_state
+                            if hasattr(state, "thought") and state.thought:
+                                details.append(f"    Thought: {state.thought}")
+                            if hasattr(state, "evaluation_previous_goal") and state.evaluation_previous_goal:
+                                details.append(f"    Eval: {state.evaluation_previous_goal}")
+
+                        # Get the action taken
+                        if hasattr(mo, "action") and mo.action:
+                            actions = mo.action if isinstance(mo.action, list) else [mo.action]
+                            for action in actions:
+                                action_str = str(action)
+                                # Truncate very long actions (like full HTML)
+                                if len(action_str) > 500:
+                                    action_str = action_str[:500] + "..."
+                                details.append(f"    Action: {action_str}")
+
+                # Try to extract result/observation
+                if hasattr(item, "result"):
+                    result = item.result
+                    if result:
+                        results = result if isinstance(result, list) else [result]
+                        for r in results:
+                            if hasattr(r, "extracted_content") and r.extracted_content:
+                                content = str(r.extracted_content)
+                                if len(content) > 500:
+                                    content = content[:500] + "..."
+                                details.append(f"    Result: {content}")
+                            elif hasattr(r, "error") and r.error:
+                                details.append(f"    Error: {r.error}")
+                            elif r is not None:
+                                r_str = str(r)
+                                if len(r_str) > 300 and r_str != "None":
+                                    r_str = r_str[:300] + "..."
+                                if r_str and r_str != "None":
+                                    details.append(f"    Result: {r_str}")
+        except Exception as e:
+            details.append(f"  (Error extracting history: {e})")
+
+    # Method 3: If raw_result has a meaningful string representation
+    if not details and raw:
+        try:
+            raw_str = str(raw)
+            if raw_str and len(raw_str) > 10 and raw_str != "None":
+                if len(raw_str) > 2000:
+                    raw_str = raw_str[:2000] + "..."
+                details.append("=== Raw Result ===")
+                details.append(raw_str)
+        except Exception:
+            pass
+
+    return "\n".join(details)
+
 # Task files that contain heterogeneous (multi-model) tasks
 MULTI_MODEL_TASK_FILES = {"multi_model"}
 
@@ -513,9 +633,15 @@ async def run_benchmark(
         console.print("[yellow]No tasks found to run[/yellow]")
         return None
 
+    # Count actual (task, level) pairs based on levels defined in tasks
     total_task_count = sum(len(tasks) for _, _, tasks in all_tasks)
-    total_runs = total_task_count * len(config.autonomy_levels)
-    console.print(f"[bold]Benchmark ({benchmark_type}): {total_task_count} tasks × {len(config.autonomy_levels)} levels = {total_runs} evaluations[/bold]")
+    requested_levels = set(config.autonomy_levels)
+    total_runs = 0
+    for _, _, tasks in all_tasks:
+        for task in tasks:
+            available = task.get_available_levels()
+            total_runs += len(available & requested_levels)
+    console.print(f"[bold]Benchmark ({benchmark_type}): {total_task_count} tasks, {total_runs} evaluations[/bold]")
 
     # Setup output directory
     if config.output_dir:
@@ -555,20 +681,34 @@ async def run_benchmark(
     # Save config to output directory
     config.to_yaml(output_dir / "config.yaml")
 
-    # Create log directory for incremental logging
-    log_dir = create_log_dir("benchmark", benchmark_type)
+    # Create log directory with same name as output directory
+    log_dir = Path("logs") / output_dir.name
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "run.log"
     console.print(f"Logs: {log_dir}")
 
+    # Helper to log to both console and file
+    def log(msg: str, style: str = ""):
+        if style:
+            console.print(f"[{style}]{msg}[/{style}]")
+        else:
+            console.print(msg)
+        with open(log_file, "a") as f:
+            f.write(msg + "\n")
+            f.flush()
+
     # Initialize log file with run info
-    log_file = log_dir / "run.log"
     with open(log_file, "w") as f:
         f.write(f"Benchmark Run #{run_id}\n")
         f.write(f"Type: {benchmark_type}\n")
         f.write(f"Model: {config.model}\n")
         f.write(f"Harness: {config.harness}\n")
-        f.write(f"Total tasks: {total_runs}\n")
+        f.write(f"Levels: {', '.join(config.autonomy_levels)}\n")
+        f.write(f"Total evaluations: {total_runs}\n")
         f.write(f"Output: {output_dir}\n")
+        f.write(f"Started: {datetime.now().isoformat()}\n")
         f.write("-" * 50 + "\n")
+        f.flush()
 
     # Run config
     run_config = RunConfig(
@@ -602,22 +742,61 @@ async def run_benchmark(
 
         for universe_path, task_file, tasks in all_tasks:
             universe_obj = load_universe(universe_path)
-            progress.update(task_progress, description=f"[cyan]{universe_obj.name}/{task_file.stem}")
+
+            # Log task file start
+            with open(log_file, "a") as f:
+                f.write(f"\n[{datetime.now().strftime('%H:%M:%S')}] Starting {universe_obj.name}/{task_file.stem} ({len(tasks)} tasks)\n")
+                f.flush()
 
             runner = TaskRunner(zoo, run_config, universe_path, universe_obj)
             await runner.setup()
 
             try:
-                results = await runner.run_and_evaluate_batch(tasks, universe_obj.name, task_file.stem)
+                # Run tasks one at a time for real-time progress
+                for task in tasks:
+                    progress.update(task_progress, description=f"[cyan]{universe_obj.name}/{task_file.stem} - Task {task.task_id}")
+                    results = await runner.run_and_evaluate_batch([task], universe_obj.name, task_file.stem)
 
-                for result in results:
-                    db.save_result(run_id, result)
-                    completed_count += 1
-                    progress.update(task_progress, completed=completed_count)
-                    # Log result incrementally
-                    with open(log_file, "a") as f:
-                        status = "✓" if result.score >= 1.0 else "✗"
-                        f.write(f"{status} Task {result.task.task_id} ({result.task_result.autonomy_level}): {result.score:.2f} ({result.task_result.duration_seconds:.1f}s)\n")
+                    for result in results:
+                        db.save_result(run_id, result)
+                        completed_count += 1
+                        progress.update(task_progress, completed=completed_count)
+                        # Save metrics/CSV incrementally so results are available mid-run
+                        _save_incremental_results(db, run_id, output_dir, config.model, config.harness, benchmark_type)
+                        # Log result incrementally with flush
+                        with open(log_file, "a") as f:
+                            status = "✓" if result.score >= 1.0 else "✗"
+                            tr = result.task_result
+                            f.write(f"  {status} Task {result.task.task_id} ({tr.autonomy_level}): {result.score:.2f} | {tr.steps} steps | {tr.duration_seconds:.1f}s\n")
+                            # Log agent details with full harness output
+                            for ar in tr.agent_results:
+                                f.write(f"    Agent {ar.agent_name}: {ar.steps} steps, {ar.duration_seconds:.1f}s\n")
+                                if ar.answer:
+                                    f.write(f"      Final Answer:\n")
+                                    for line in ar.answer.split('\n'):
+                                        f.write(f"        {line}\n")
+                                if ar.error:
+                                    f.write(f"      Error: {ar.error}\n")
+                                # Extract and log full harness details
+                                harness_details = _extract_harness_details(ar)
+                                if harness_details:
+                                    f.write(f"      --- Harness Details ---\n")
+                                    for line in harness_details.split('\n'):
+                                        f.write(f"        {line}\n")
+                            # Log subtask results with judge reasoning
+                            if tr.subtask_results:
+                                f.write(f"    --- Evaluation Results ---\n")
+                                for sr in tr.subtask_results:
+                                    sr_status = "✓" if sr.passed else "✗"
+                                    f.write(f"    {sr_status} {sr.subtask_id}: {sr.description}\n")
+                                    if sr.evidence:
+                                        f.write(f"      Judge reasoning:\n")
+                                        for line in sr.evidence.split('\n'):
+                                            f.write(f"        {line}\n")
+                            if tr.error:
+                                f.write(f"    Task Error: {tr.error}\n")
+                            f.write("\n" + "-" * 60 + "\n")
+                            f.flush()
             finally:
                 await runner.teardown()
 
@@ -641,6 +820,17 @@ async def run_benchmark(
         console.print(f"[green]Results saved to {output_dir} (metrics.json + results.csv)[/green]")
     else:
         console.print(f"[green]Results saved to {output_dir}[/green]")
+
+    # Write final summary to log
+    with open(log_file, "a") as f:
+        f.write("\n" + "=" * 50 + "\n")
+        f.write(f"Finished: {datetime.now().isoformat()}\n")
+        f.write(f"Completed: {metrics.total_completed}/{metrics.total_tasks}\n")
+        f.write(f"Score: {metrics.overall_score:.2f}\n")
+        f.write(f"Completion rate: {metrics.overall_completion_rate:.1%}\n")
+        f.write(f"Total duration: {metrics.total_duration_seconds:.1f}s\n")
+        f.write(f"Results: {output_dir}\n")
+        f.flush()
 
     db.close()
     return metrics

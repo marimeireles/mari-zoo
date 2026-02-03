@@ -1,154 +1,246 @@
+# Harnesses
+
+A **harness** is the agent framework that runs your tasks. Zoo-eval is harness-agnostic - you can use any agent framework as long as it can control a browser.
+
+## Available Harnesses
+
+| Harness | Description | CLI flag |
+|---------|-------------|----------|
+| `browser_use` | [Browser Use](https://github.com/browser-use/browser-use) framework (default) | `--harness browser_use` |
+| `claude_sdk` | Anthropic Claude with computer use | `--harness claude_sdk` |
+
+## Using a Harness
+
+### Run a task
+```bash
+# Default harness (browser_use)
+uv run zoo-eval run startup -t email
+
+# Specify harness
+uv run zoo-eval run startup -t email --harness browser_use
+uv run zoo-eval run startup -t email --harness claude_sdk
+```
+
+### Run a benchmark
+```bash
+# Default harness
+uv run zoo-eval benchmark -u startup
+
+# Specify harness
+uv run zoo-eval benchmark -u startup --harness claude_sdk
+```
+
+### Harness-specific options
+
+**browser_use:**
+```bash
+uv run zoo-eval run startup -t email \
+  --harness browser_use \
+  --model openai/gpt-4o \      # Any OpenRouter or OpenAI model
+  --max-steps 30
+```
+
+**claude_sdk:**
+```bash
+uv run zoo-eval run startup -t email \
+  --harness claude_sdk \
+  --claude-model sonnet \       # opus, sonnet, or haiku
+  --max-steps 30
+```
+
+---
+
 # Adding a New Harness
 
-## Quick Start
+## Overview
 
-1. **Create your runner** in `src/zoo_eval/your_harness_runner.py`:
+To add a new harness:
+1. Create a runner class that extends `BaseAgentRunner`
+2. Register it in the factory function
+3. Add the harness name to the enum
+
+## Step 1: Create Your Runner
+
+Create `src/zoo_eval/your_harness_runner.py`:
 
 ```python
 from .base_agent_runner import BaseAgentRunner
-from .proxy_event_source import ProxyEventSource
-from .scenes import SceneManager
+from .models import Task, TaskResult, AgentResult
 
 class YourHarnessRunner(BaseAgentRunner):
-    async def run_tasks(self, tasks):
-        results = []
-        for task in tasks:
-            # Set up scene triggers if task has a scene
-            scene_manager = None
-            if task.scene_name:
-                event_source = ProxyEventSource(
-                    redis_url=self.config.redis_url,
-                    session_id=str(uuid.uuid4()),
-                )
-                scene_manager = SceneManager(
-                    self.zoo,
-                    self.universe_path,
-                    event_source=event_source,
-                )
-                await scene_manager.load_and_setup(task.scene_name)
-                await scene_manager.setup_triggers()
+    """Runner for YourHarness framework."""
 
-            try:
-                # Run your agent with proxy configured
-                result = await self._run_agent(
-                    task,
-                    proxy_url=self.zoo.config.proxy_url,  # Required!
-                )
+    async def setup(self):
+        """Initialize your agent framework."""
+        # e.g., start browser, load models
+        pass
+
+    async def teardown(self):
+        """Cleanup resources."""
+        pass
+
+    async def run_tasks(self, tasks: list[Task]) -> list[TaskResult]:
+        """Run tasks and return results."""
+        results = []
+
+        for task in tasks:
+            for level in self._get_levels_to_run(task):
+                result = await self._run_single_task(task, level)
                 results.append(result)
-            finally:
-                if scene_manager:
-                    await scene_manager.cleanup()
 
         return results
+
+    async def _run_single_task(self, task: Task, level: str) -> TaskResult:
+        """Run a single task at a specific autonomy level."""
+
+        # 1. Get the prompt for this level
+        agent_config = list(task.agents.values())[0]
+        prompt = agent_config.autonomy_levels.get(level)
+
+        # 2. Build context (includes credentials, sensitive data)
+        context = self._build_agent_context(agent_config, task)
+
+        # 3. Run your agent
+        # IMPORTANT: Route traffic through proxy
+        answer, steps, duration = await self._run_your_agent(
+            prompt=prompt,
+            context=context,
+            proxy_url=self.zoo.config.proxy_url,  # Required!
+        )
+
+        # 4. Return result
+        return TaskResult(
+            task_id=task.task_id,
+            autonomy_level=level,
+            agent_answer=answer,
+            steps=steps,
+            duration_seconds=duration,
+            agent_results=[
+                AgentResult(
+                    agent_name=agent_config.name,
+                    agent_role="user",
+                    answer=answer,
+                    steps=steps,
+                    duration_seconds=duration,
+                )
+            ],
+        )
 ```
 
-2. **Register it** in `src/zoo_eval/runner.py`:
+## Step 2: Register Your Harness
 
+Add to `src/zoo_eval/models.py`:
 ```python
-from .models import AgentHarness
-
-# Add to AgentHarness enum in models.py:
-YOUR_HARNESS = "your_harness"
-
-# Add to create_agent_runner():
-if config.harness == AgentHarness.YOUR_HARNESS:
-    from .your_harness_runner import YourHarnessRunner
-    return YourHarnessRunner(zoo, config, universe_path, universe)
+class AgentHarness(str, Enum):
+    BROWSER_USE = "browser_use"
+    CLAUDE_SDK = "claude_sdk"
+    YOUR_HARNESS = "your_harness"  # Add this
 ```
 
-3. **Add CLI option** in `src/zoo_eval/cli.py` (already supports any harness value).
+Add to `src/zoo_eval/runner.py`:
+```python
+def create_agent_runner(zoo, config, universe_path, universe):
+    if config.harness == AgentHarness.YOUR_HARNESS:
+        from .your_harness_runner import YourHarnessRunner
+        return YourHarnessRunner(zoo, config, universe_path, universe)
+    # ... existing harnesses
+```
+
+## Step 3: Use It
+
+```bash
+uv run zoo-eval run startup -t email --harness your_harness
+```
+
+---
 
 ## Requirements
 
-Your harness MUST:
-- Route all HTTP traffic through `zoo.config.proxy_url` (default: `http://localhost:3128`)
-- Handle SSL/TLS (zoo uses self-signed certs, use `verify=False` or equivalent)
-- Use `_build_agent_context(agent_config, task)` to include credentials and sensitive data in agent context
+Your harness **MUST**:
 
-## API Reference
+1. **Route all traffic through the proxy**
+   ```python
+   proxy_url = self.zoo.config.proxy_url  # http://localhost:3128
+   ```
+   This is how Zoo intercepts requests for scenes and triggers.
 
-### ProxyEventSource
+2. **Handle self-signed certificates**
+   Zoo uses self-signed certs. Disable SSL verification or trust the Zoo CA.
+
+3. **Return TaskResult with required fields**
+   ```python
+   TaskResult(
+       task_id=task.task_id,
+       autonomy_level="L0",
+       agent_answer="The result...",  # What the judge evaluates
+   )
+   ```
+
+---
+
+## Scenes and Triggers
+
+If your tasks use scenes (dynamic environment setup), you need to handle the SceneManager:
+
 ```python
-from zoo_eval.proxy_event_source import ProxyEventSource
+from .scenes import SceneManager
+from .proxy_event_source import ProxyEventSource
 
-event_source = ProxyEventSource(
-    redis_url="redis://localhost:6379",
-    session_id="optional-for-filtering",  # Filters events by X-Zoo-Session header
-)
-await event_source.start()
-# ... use with SceneManager ...
-await event_source.stop()
+async def _run_single_task(self, task, level):
+    scene_manager = None
+
+    # Set up scene if task has one
+    if task.scene_name:
+        event_source = ProxyEventSource(
+            redis_url=self.config.redis_url,
+            session_id=str(uuid.uuid4()),
+        )
+        scene_manager = SceneManager(
+            self.zoo,
+            self.universe_path,
+            event_source=event_source,
+        )
+        await scene_manager.load_and_setup(task.scene_name)
+        await scene_manager.setup_triggers()
+
+    try:
+        # Run your agent...
+        result = await self._run_agent(...)
+        return result
+    finally:
+        if scene_manager:
+            await scene_manager.cleanup()
 ```
 
-### SceneManager
-```python
-from zoo_eval.scenes import SceneManager
+---
 
-scene_manager = SceneManager(
-    zoo=zoo,
-    universe_path=Path("pet_to_wild/universes/startup"),
-    event_source=event_source,  # Required for request triggers
-)
-await scene_manager.load_and_setup("scene_name")  # Runs setup scripts
-await scene_manager.setup_triggers()               # Activates triggers
-# ... run agent ...
-await scene_manager.cleanup()
-```
+## Logging
 
-### BaseAgentRunner
-```python
-from zoo_eval.base_agent_runner import BaseAgentRunner
+All runs log to `logs/` in real-time. Populate these fields for detailed logs:
 
-class YourRunner(BaseAgentRunner):
-    async def setup(self): ...      # Called before running tasks
-    async def teardown(self): ...   # Called after all tasks
-    async def run_tasks(self, tasks) -> list[TaskResult]: ...  # Main entry point
-```
-
-## Trigger Types
-
-| Type | Description | Needs EventSource |
-|------|-------------|-------------------|
-| `request` | Fires on HTTP request matching URL pattern | Yes |
-| `poll` | Polls endpoint until condition met | No |
-| `time` | Fires after delay (seconds) | No |
-| `page_load` | Fires immediately | No |
-
-## Evaluation System
-
-Your harness returns `TaskResult` → generic LLM judge evaluates it.
-
-**Required fields:**
-```python
-TaskResult(
-    task_id=task.task_id,
-    agent_answer="Final output text",    # What judge evaluates
-    autonomy_level="L1",
-)
-```
-
-**Optional fields for better evaluation:**
 ```python
 TaskResult(
-    agent_results=[AgentResult(...)],    # Per-agent details (multi-agent)
-    final_url="https://...",              # Last URL
-    page_content="<html>...</html>",      # Final page HTML
-    steps=42,                             # Action count
-    duration_seconds=120.5,
-    raw_result=your_result,               # If has agent_steps() method, judge uses it
+    task_id=101,
+    autonomy_level="L0",
+    agent_answer="...",
+    steps=12,                    # Shows in log
+    duration_seconds=32.5,       # Shows in log
+    error="...",                 # Shows if present
+    agent_results=[
+        AgentResult(
+            agent_name="alice",
+            steps=12,
+            duration_seconds=32.5,
+            answer="...",        # Preview shown in log
+            error="...",         # Shows if present
+        )
+    ],
+    subtask_results=[...],       # Pass/fail shown in log
 )
 ```
 
-**Judge sees:** `agent_answer` + step descriptions (if `raw_result.agent_steps()` exists)
-**Judge doesn't see:** Screenshots, tool calls, internal state
+---
 
-## File Structure
+## Reference Implementation
 
-```
-src/zoo_eval/
-├── base_agent_runner.py    # Extend this
-├── evaluators.py           # LLM judge (harness-agnostic)
-├── models.py               # TaskResult, AgentResult
-├── browser_use_runner.py   # Reference implementation
-└── your_harness_runner.py  # Your harness
-```
+See `src/zoo_eval/browser_use_runner.py` for a complete example.
