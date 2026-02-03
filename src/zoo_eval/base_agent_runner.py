@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import uuid
 from abc import ABC, abstractmethod
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, AsyncIterator
 
 from .auth import get_credentials_for_agent
 from .models import AgentResult, RunConfig, Task, TaskAgentConfig, TaskResult, Universe
 
 if TYPE_CHECKING:
+    from .scenes import SceneManager
     from .zoo import Zoo
 
 
@@ -108,6 +111,67 @@ class BaseAgentRunner(ABC):
         task_instruction = agent_config.autonomy_levels.get(autonomy_level, task.intent)
 
         return f"Go to {start_url}. {task_instruction}"
+
+    @asynccontextmanager
+    async def scene_context(self, task: Task) -> AsyncIterator["SceneManager | None"]:
+        """Context manager for scene setup and cleanup.
+
+        Handles all the boilerplate of setting up scenes, including:
+        - Loading scene configuration from the universe
+        - Setting up initial state (emails, repos, boards, etc.)
+        - Configuring triggers for dynamic events
+        - Cleaning up after the task completes
+
+        Usage:
+            async with self.scene_context(task) as scene_manager:
+                result = await self._run_agent(...)
+                # scene_manager is None if task has no scene
+
+        Args:
+            task: The task being run (may or may not have a scene_name)
+
+        Yields:
+            SceneManager instance if task has a scene, None otherwise
+        """
+        if not task.scene_name:
+            yield None
+            return
+
+        from .scenes import SceneManager
+        from .proxy_event_source import ProxyEventSource
+
+        # Determine if we need proxy-based event source
+        from .models import load_scene
+        scenes_dir = self.universe_path / "scenes" if self.universe_path else None
+        scene_path = scenes_dir / f"{task.scene_name}.yaml" if scenes_dir else None
+        scene = load_scene(scene_path) if scene_path and scene_path.exists() else None
+
+        use_proxy = self.config.use_proxy_events or (scene and scene.needs_proxy_events)
+        event_source = None
+        if use_proxy:
+            session_id = str(uuid.uuid4())
+            event_source = ProxyEventSource(
+                redis_url=self.config.redis_url,
+                session_id=session_id,
+            )
+
+        universe_sites = self.universe.sites if self.universe else []
+        scene_manager = SceneManager(
+            self.zoo,
+            self.universe_path,
+            universe_sites,
+            event_source=event_source,
+        )
+
+        try:
+            await scene_manager.load_and_setup(task.scene_name)
+            await scene_manager.setup_triggers()
+            yield scene_manager
+        finally:
+            try:
+                await scene_manager.cleanup()
+            except Exception:
+                pass
 
     @abstractmethod
     async def setup(self):

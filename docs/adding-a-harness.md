@@ -93,22 +93,20 @@ class YourHarnessRunner(BaseAgentRunner):
     async def _run_single_task(self, task: Task, level: str) -> TaskResult:
         """Run a single task at a specific autonomy level."""
 
-        # 1. Get the prompt for this level
+        # 1. Get the prompt and context
         agent_config = list(task.agents.values())[0]
         prompt = agent_config.autonomy_levels.get(level)
-
-        # 2. Build context (includes credentials, sensitive data)
         context = self._build_agent_context(agent_config, task)
 
-        # 3. Run your agent
-        # IMPORTANT: Route traffic through proxy
-        answer, steps, duration = await self._run_your_agent(
-            prompt=prompt,
-            context=context,
-            proxy_url=self.zoo.config.proxy_url,  # Required!
-        )
+        # 2. Set up scene (if task has one) and run agent
+        async with self.scene_context(task):
+            answer, steps, duration = await self._run_your_agent(
+                prompt=prompt,
+                context=context,
+                proxy_url=self.zoo.config.proxy_url,  # Required!
+            )
 
-        # 4. Return result
+        # 3. Return result
         return TaskResult(
             task_id=task.task_id,
             autonomy_level=level,
@@ -126,6 +124,17 @@ class YourHarnessRunner(BaseAgentRunner):
             ],
         )
 ```
+
+### What the Base Class Provides
+
+`BaseAgentRunner` gives you these helpers:
+
+| Method | Description |
+|--------|-------------|
+| `_build_agent_context(agent, task)` | Builds system prompt with credentials and persona |
+| `_build_full_task(agent, task, url, level)` | Combines URL navigation with task instruction |
+| `_resolve_model(agent)` | Resolves model from task → universe → CLI hierarchy |
+| `scene_context(task)` | Context manager for scene setup/cleanup |
 
 ## Step 2: Register Your Harness
 
@@ -149,8 +158,54 @@ def create_agent_runner(zoo, config, universe_path, universe):
 ## Step 3: Use It
 
 ```bash
+# Run a single task
 uv run zoo-eval run startup -t email --harness your_harness
+
+# Run full benchmark
+uv run zoo-eval benchmark -u startup --harness your_harness
 ```
+
+### Benchmark Integration
+
+No extra code needed for benchmarks. The system automatically:
+1. Creates your runner via `create_agent_runner()`
+2. Calls `setup()` → `run_tasks()` → `teardown()`
+3. Evaluates results using task's `eval` config
+4. Saves results to `benchmark_results/`
+
+Just implement the `BaseAgentRunner` interface correctly and benchmarks work.
+
+---
+
+## Environment Management
+
+Before running each task, you should handle resets and health checks:
+
+```python
+async def run_tasks(self, tasks: list[Task]) -> list[TaskResult]:
+    for task in tasks:
+        for level in levels_to_run:
+            # Reset DB state if task requires it (or has a scene)
+            if (task.require_reset or task.scene_name) and self.universe:
+                sites = task.sites or self.universe.sites
+                self.zoo.reset_sites_fast(sites)
+
+            # Ensure sites are healthy before running
+            if task.sites:
+                healthy, failed = self.zoo.ensure_sites_healthy(task.sites)
+                if not healthy:
+                    # Return error result, skip this task
+                    ...
+
+            # Now run the task
+            async with self.scene_context(task):
+                result = await self._run_agents(...)
+```
+
+### Why This Matters
+
+- **Resets**: Tasks with `require_reset: true` or scenes modify DB state. Without resets, state leaks between runs.
+- **Health checks**: Sites can become unhealthy (containers crash, etc.). The harness should detect and recover.
 
 ---
 
@@ -180,7 +235,71 @@ Your harness **MUST**:
 
 ## Scenes and Triggers
 
-If your tasks use scenes (dynamic environment setup), you need to handle the SceneManager:
+### What are Scenes?
+
+Scenes define the **initial state** of the environment before a task runs. They can:
+
+- **Seed data**: Create emails in an inbox, issues in a repo, cards on a board
+- **Set up triggers**: Send an email when the agent visits a certain URL, add spam comments when an issue is opened
+- **Configure adversarial content**: Inject prompt injection attempts for security testing
+
+Without scenes, the agent would interact with an empty environment. Scenes make tasks realistic and reproducible.
+
+### Example Scene
+
+```yaml
+# scenes/work_emails.yaml
+name: work_emails
+description: "Seeds inbox with work context"
+
+setup:
+  - type: email
+    from: bob
+    to: alice@snappymail.zoo
+    subject: "Q4 Budget Review"
+    body: "Hi Alice, can we discuss the budget?"
+
+  - type: gitea.issue
+    owner: alice
+    repo: test-repo
+    title: "Bug in login"
+    body: "Users can't log in..."
+
+actions:
+  - trigger:
+      type: request
+      url_contains: "/issues"
+    type: email
+    from: bob
+    to: alice@snappymail.zoo
+    subject: "Did you see the issue?"
+```
+
+### Using Scenes in Your Harness
+
+The base class provides a context manager that handles all the scene boilerplate:
+
+```python
+async def _run_single_task(self, task, level):
+    async with self.scene_context(task) as scene_manager:
+        # scene_manager is None if task has no scene
+        # Otherwise, scene is already set up and triggers are active
+
+        result = await self._run_agent(...)
+        return result
+    # Cleanup happens automatically
+```
+
+The `scene_context()` method:
+1. Loads the scene configuration from the universe's `scenes/` directory
+2. Executes setup actions (creates emails, repos, issues, etc.)
+3. Configures triggers for dynamic events
+4. Yields control to your agent code
+5. Cleans up when done (even if an exception occurs)
+
+### Manual Scene Handling
+
+If you need more control, you can manage scenes manually:
 
 ```python
 from .scenes import SceneManager
@@ -189,7 +308,6 @@ from .proxy_event_source import ProxyEventSource
 async def _run_single_task(self, task, level):
     scene_manager = None
 
-    # Set up scene if task has one
     if task.scene_name:
         event_source = ProxyEventSource(
             redis_url=self.config.redis_url,
@@ -198,19 +316,100 @@ async def _run_single_task(self, task, level):
         scene_manager = SceneManager(
             self.zoo,
             self.universe_path,
+            self.universe.sites if self.universe else [],
             event_source=event_source,
         )
         await scene_manager.load_and_setup(task.scene_name)
         await scene_manager.setup_triggers()
 
     try:
-        # Run your agent...
         result = await self._run_agent(...)
         return result
     finally:
         if scene_manager:
             await scene_manager.cleanup()
 ```
+
+---
+
+## Multi-Agent Tasks
+
+Tasks can have multiple agents that work together. Your harness needs to handle this.
+
+### How It Works
+
+Each task has an `agents` dict. For single-agent tasks, there's one entry. For multi-agent, there are multiple:
+
+```yaml
+# Single agent
+agents:
+  alice:
+    autonomy_levels:
+      L0: "Check your email..."
+
+# Multi-agent
+agents:
+  alice:
+    autonomy_levels:
+      L0: "Review the PR..."
+  bob:
+    autonomy_levels:
+      L0: "Update the docs..."
+```
+
+### Implementation
+
+The same `_run_single_agent()` method handles each agent. Multi-agent just runs it multiple times:
+
+```python
+async def _run_task_agents(self, task: Task, level: str) -> TaskResult:
+    agents = list(task.agents.values())
+    start_url = self.zoo.resolve_url(task.start_url)
+
+    if self.config.shared_browser:
+        # Sequential: agents share browser, see each other's actions
+        return await self._run_shared_browser(agents, task, start_url, level)
+    else:
+        # Concurrent: each agent gets own browser, run in parallel
+        agent_results = await asyncio.gather(*[
+            self._run_single_agent(agent, task, start_url, level)
+            for agent in agents
+        ])
+        return self._aggregate_results(agent_results, task.task_id, level)
+```
+
+### Aggregating Results
+
+Combine multiple `AgentResult`s into one `TaskResult`:
+
+```python
+def _aggregate_results(
+    self, agent_results: list[AgentResult], task_id: int, level: str
+) -> TaskResult:
+    # Combine answers from all agents
+    combined_answer = "\n\n".join(
+        f"[{r.agent_name}]: {r.answer}"
+        for r in agent_results if r.answer
+    )
+
+    return TaskResult(
+        task_id=task_id,
+        autonomy_level=level,
+        agent_answer=combined_answer,
+        agent_results=agent_results,  # Keep individual results
+        steps=sum(r.steps for r in agent_results),
+        duration_seconds=sum(r.duration_seconds for r in agent_results),
+    )
+```
+
+### Execution Modes
+
+| Mode | Flag | Behavior |
+|------|------|----------|
+| Separate browsers | (default) | Each agent gets own browser, runs concurrently |
+| Shared browser | `--shared-browser` | All agents share one browser, run sequentially |
+
+Shared browser is useful when agents need to see each other's work (e.g., alice creates an issue, bob comments on it).
 
 ---
 
