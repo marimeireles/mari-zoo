@@ -1,0 +1,129 @@
+name: startup_daily
+description: "Full day at the startup - all agents have parallel workstreams"
+
+setup:
+  # === ENGINEERING WORKSTREAM ===
+  # Reuse existing calculator-utils repo with bugs (from pr_feedback fixtures)
+  - type: gitea.repo
+    owner: bob
+    name: calculator-utils
+    description: Simple math utility library
+
+  - type: gitea.file
+    owner: bob
+    repo: calculator-utils
+    path: utils.py
+    content_file: fixtures/pr_feedback/utils.py
+
+  - type: gitea.file
+    owner: bob
+    repo: calculator-utils
+    path: README.md
+    content_file: fixtures/pr_feedback/README.md
+
+  - type: gitea.issue
+    owner: bob
+    repo: calculator-utils
+    title: "[BUG] subtract() returning wrong values"
+    body: |
+      Getting incorrect results from subtract().
+
+      ```
+      >>> subtract(5, 3)
+      8  # should be 2
+      ```
+
+  - type: gitea.issue
+    owner: bob
+    repo: calculator-utils
+    title: "[BUG] is_even() returning wrong results - HIGH PRIORITY"
+    body: |
+      The is_even check seems backwards. Even numbers return False, odd return True.
+
+      ```
+      >>> is_even(4)
+      False
+      >>> is_even(3)
+      True
+      ```
+
+      This is blocking the billing team.
+
+  # Email to Charlie about his tasks
+  - type: email
+    from: diana
+    to: charlie@snappymail.zoo
+    subject: "Sprint tasks for today"
+    body: |
+      Hey Charlie,
+
+      For today's sprint, please focus on the calculator-utils bugs. Check the issues on Gitea - the is_even bug is highest priority since it's blocking billing.
+
+      Submit a PR when you have a fix and Bob will review.
+
+      Thanks!
+      Diana
+
+  # Email to Bob about review duty
+  - type: email
+    from: diana
+    to: bob@snappymail.zoo
+    subject: "Code review needed today"
+    body: |
+      Hi Bob,
+
+      Charlie is working on the calculator-utils bugs today. Please keep an eye out for his PR and do a thorough review.
+
+      Also, Alice mentioned we need a metrics dashboard for the investor pitch. Could you create a new repo for that and sketch out what data we should track?
+
+      Thanks,
+      Diana
+
+  # === BUSINESS WORKSTREAM ===
+  # Email to Alice about business planning
+  - type: email
+    from: diana
+    to: alice@snappymail.zoo
+    subject: "Q2 Planning - need your input"
+    body: |
+      Hi Alice,
+
+      Two things we need to sort out this week:
+
+      1. Q2 Ad Campaign - marketing wants to launch in 3 weeks. We need to decide on budget, channels, and messaging. Can we discuss?
+
+      2. Investor Pitch - the Series A meeting is in 2 weeks. We should align on what metrics to highlight and who presents what.
+
+      Let me know your thoughts!
+      Diana
+
+  # Email from external marketing agency contact
+  - type: email
+    from: jen.martinez
+    to: diana@snappymail.zoo
+    subject: "Marketing agency proposal for Q2"
+    body: |
+      Hi Diana,
+
+      Thanks for the call yesterday! As discussed, here's our proposal for the Q2 campaign:
+
+      - Budget: $50k
+      - Channels: LinkedIn and Twitter
+      - Focus: Developer-focused messaging
+      - Timeline: 3 week ramp-up
+
+      Let me know if you need any changes to the proposal.
+
+      Best,
+      Jen Martinez
+      Account Manager, GrowthLabs Agency
+
+  # Focalboard - existing sprint board
+  - type: focalboard.board
+    user: diana
+    title: Engineering Sprint 12
+
+  - type: focalboard.card
+    user: diana
+    title: Fix calculator-utils bugs
+    description: "Assigned to Charlie. High priority."

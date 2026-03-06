@@ -8,14 +8,11 @@ import os
 from pathlib import Path
 
 import typer
-from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
 
-from .models import AgentHarness, RunConfig, load_tasks, load_universe
-
-# Load .env file from current directory
-load_dotenv()
+from .benchmark import BenchmarkConfig, create_log_dir, run_benchmark, _extract_harness_details
+from .models import AUTONOMY_LEVELS, AgentHarness, RunConfig, load_tasks, load_universe
 from .results import ResultsDB, print_report
 from .runner import TaskRunner
 from .zoo import Zoo, ZooConfig
@@ -76,15 +73,16 @@ def run(
     max_steps: int = typer.Option(30, help="Max steps per task"),
     timeout: int = typer.Option(120, help="Timeout in seconds per task"),
     model: str = typer.Option("google/gemini-2.5-flash-lite", "--model", "-m", help="Agent model (auto-detects: '/' → OpenRouter, else OpenAI). Aliases: flash, sonnet"),
-    judge_model: str = typer.Option(None, "--judge-model", "-j", help="LLM judge model (default: gpt-4o, auto-detects provider like --model)"),
+    judge_model: str = typer.Option(None, "--judge-model", "-j", help="LLM judge model (default: gpt-5.1, auto-detects provider like --model)"),
     shared_browser: bool = typer.Option(False, "--shared-browser", help="All agents share same browser and memory"),
-    level: list[str] = typer.Option(["L1"], "--level", "-L", help="Autonomy level(s) to run: L0, L1, L2 (can specify multiple)"),
-    harness: str = typer.Option("browser_use", "--harness", "-H", help="Agent harness: browser_use or claude_sdk"),
+    level: list[str] = typer.Option(None, "--level", "-L", help="Autonomy level(s) to run: L0, L1, L2 (can specify multiple, default: all)"),
+    harness: str = typer.Option("browser_use", "--harness", "-H", help="Agent harness to use"),
     claude_model: str = typer.Option("sonnet", "--claude-model", help="Claude model for claude_sdk harness: opus, sonnet, haiku"),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
-    no_zoo_reset: bool = typer.Option(False, "--no-zoo-reset", help="Skip Docker restart/reset (assume services are ready)"),
     db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
+    use_proxy_events: bool = typer.Option(False, "--use-proxy-events", help="Force proxy events (auto-detected from scene request triggers)"),
+    redis_url: str = typer.Option("redis://localhost:6379", "--redis-url", help="Redis URL for proxy events"),
 ):
     """Run evaluation tasks from a universe directory."""
     # Validate harness
@@ -170,11 +168,15 @@ def run(
         tasks_info += f":{','.join(str(t) for t in task_ids)}"
 
     # Validate and normalize autonomy levels first (needed for resume check)
-    valid_levels = {"L0", "L1", "L2"}
-    autonomy_levels = [lvl.upper() for lvl in level]
+    valid_levels = set(AUTONOMY_LEVELS)
+    # Default to all levels if none specified
+    if level is None:
+        autonomy_levels = list(AUTONOMY_LEVELS)
+    else:
+        autonomy_levels = [lvl.upper() for lvl in level]
     invalid = set(autonomy_levels) - valid_levels
     if invalid:
-        console.print(f"[red]Invalid autonomy level(s): {invalid}. Valid: L0, L1, L2[/red]")
+        console.print(f"[red]Invalid autonomy level(s): {invalid}. Valid: {', '.join(AUTONOMY_LEVELS)}[/red]")
         raise typer.Exit(1)
 
     completed_pairs: set[tuple[int, str]] = set()
@@ -211,6 +213,11 @@ def run(
 
     levels_str = ", ".join(autonomy_levels)
     model_info = claude_model if harness_enum == AgentHarness.CLAUDE_SDK else model
+
+    # Create log directory for this run
+    log_dir = create_log_dir("run", universe_obj.name, task_file_name)
+    console.print(f"Logs: {log_dir}")
+
     console.print(f"Run #{run_id}: Running {len(tasks)} task(s) with harness={harness}, model={model_info}, levels=[{levels_str}]...")
     if completed_pairs:
         console.print(f"  ({len(remaining_pairs)} remaining, {len(completed_pairs)} already done)")
@@ -220,25 +227,33 @@ def run(
         max_steps=max_steps,
         timeout_seconds=timeout,
         model=model,
-        judge_model=judge_model or "gpt-4o",
+        judge_model=judge_model or "gpt-5.1",
         shared_browser=shared_browser,
         autonomy_levels=autonomy_levels,
         completed_pairs=completed_pairs,
         harness=harness_enum,
         claude_model=claude_model,
-        skip_zoo_reset=no_zoo_reset,
+        use_proxy_events=use_proxy_events,
+        redis_url=redis_url,
     )
     runner = TaskRunner(zoo, run_config, universe_path, universe_obj)
 
+    # Initialize log file
+    log_file = log_dir / "run.log"
+    from datetime import datetime
+    with open(log_file, "w") as f:
+        f.write(f"Run #{run_id}\n")
+        f.write(f"Universe: {universe_obj.name}\n")
+        f.write(f"Task file: {task_file_name}\n")
+        f.write(f"Model: {model_info}\n")
+        f.write(f"Harness: {harness}\n")
+        f.write(f"Levels: {levels_str}\n")
+        f.write(f"Tasks: {len(tasks)}\n")
+        f.write(f"Started: {datetime.now().isoformat()}\n")
+        f.write("-" * 50 + "\n")
+        f.flush()
+
     async def execute():
-        # Suppress Claude SDK async cleanup warnings
-        def suppress_claude_sdk_errors(loop, context):
-            if "cancel scope" in str(context.get("exception", "")):
-                return  # Suppress known SDK bug
-            loop.default_exception_handler(context)
-
-        asyncio.get_event_loop().set_exception_handler(suppress_claude_sdk_errors)
-
         await runner.setup()
         try:
             console.print(f"  Running {len(tasks)} task(s)...")
@@ -249,27 +264,89 @@ def run(
             # Save and display results
             for result in results:
                 db.save_result(run_id, result)
-                status = "[green]PASS[/green]" if result.passed else "[red]FAIL[/red]"
+                score = result.score
+                if score >= 1.0:
+                    status = f"[green]{score:.2f}[/green]"
+                elif score >= 0.5:
+                    status = f"[yellow]{score:.2f}[/yellow]"
+                else:
+                    status = f"[red]{score:.2f}[/red]"
                 level = result.task_result.autonomy_level
+                subtasks = result.task_result.subtask_results
+                subtask_info = f" ({sum(1 for s in subtasks if s.passed)}/{len(subtasks)})" if subtasks else ""
                 console.print(
-                    f"  Task {result.task.task_id} ({level}): {status} ({result.task_result.duration_seconds:.1f}s)"
+                    f"  Task {result.task.task_id} ({level}): {status}{subtask_info} ({result.task_result.duration_seconds:.1f}s)"
                 )
+                # Log to file in real-time
+                with open(log_file, "a") as f:
+                    status_char = "✓" if score >= 1.0 else "✗"
+                    tr = result.task_result
+                    f.write(f"{status_char} Task {result.task.task_id} ({level}): {score:.2f} | {tr.steps} steps | {tr.duration_seconds:.1f}s\n")
+                    # Log agent details with full harness output
+                    for ar in tr.agent_results:
+                        f.write(f"  Agent {ar.agent_name}: {ar.steps} steps, {ar.duration_seconds:.1f}s\n")
+                        if ar.answer:
+                            f.write(f"    Final Answer:\n")
+                            for line in ar.answer.split('\n'):
+                                f.write(f"      {line}\n")
+                        if ar.error:
+                            f.write(f"    Error: {ar.error}\n")
+                        # Extract and log full harness details
+                        harness_details = _extract_harness_details(ar)
+                        if harness_details:
+                            f.write(f"    --- Harness Details ---\n")
+                            for line in harness_details.split('\n'):
+                                f.write(f"      {line}\n")
+                    # Log subtask results with judge reasoning
+                    if subtasks:
+                        f.write(f"  --- Evaluation Results ---\n")
+                        for sr in subtasks:
+                            sr_status = "✓" if sr.passed else "✗"
+                            f.write(f"  {sr_status} {sr.subtask_id}: {sr.description}\n")
+                            if sr.evidence:
+                                f.write(f"    Judge reasoning:\n")
+                                for line in sr.evidence.split('\n'):
+                                    f.write(f"      {line}\n")
+                    if tr.error:
+                        f.write(f"  Task Error: {tr.error}\n")
+                    f.write("\n" + "-" * 60 + "\n")
+                    f.flush()
         finally:
             await runner.teardown()
 
-    # Run with error suppression for Claude SDK shutdown issues
-    try:
-        asyncio.run(execute())
-    except RuntimeError as e:
-        if "cancel scope" in str(e):
-            # Suppress known Claude SDK async cleanup bug
-            pass
-        else:
-            raise
+    asyncio.run(execute())
 
     # Finish run and show report
     db.finish_run(run_id)
     print_report(db, run_id)
+
+    # Save run summary to log directory
+    run_results = db.get_run_results(run_id)
+    run_stats = db.get_run_stats(run_id)
+    log_data = {
+        "run_id": run_id,
+        "universe": universe_obj.name,
+        "task_file": task_file_name,
+        "model": model_info,
+        "harness": harness,
+        "autonomy_levels": autonomy_levels,
+        "stats": run_stats,
+        "results": run_results,
+    }
+    with open(log_dir / "results.json", "w") as f:
+        json.dump(log_data, f, indent=2)
+
+    # Write final summary to log
+    with open(log_file, "a") as f:
+        f.write("\n" + "=" * 50 + "\n")
+        f.write(f"Finished: {datetime.now().isoformat()}\n")
+        f.write(f"Completed: {run_stats['completed']}/{run_stats['total']}\n")
+        f.write(f"Score: {run_stats['avg_score']:.2f}\n")
+        f.write(f"Completion rate: {run_stats['completion_rate']:.1f}%\n")
+        f.flush()
+
+    console.print(f"[green]Results saved to {log_dir}[/green]")
+
     db.close()
 
 
@@ -317,155 +394,6 @@ def report(
             raise typer.Exit(1)
 
         print_report(db, run_id, detailed=detailed)
-
-    db.close()
-
-
-@app.command("eval")
-def evaluate(
-    universe: Path = typer.Argument(..., help="Path to universe directory"),
-    task_file: str = typer.Option(..., "--task", "-t", help="Task file name (without .yaml)"),
-    run_id: int = typer.Option(None, "--run", "-r", help="Run ID to re-evaluate (default: latest)"),
-    task_id: list[int] = typer.Option(None, "--id", "-i", help="Task ID(s) to evaluate (default: all in run)"),
-    level: list[str] = typer.Option(None, "--level", "-L", help="Autonomy level(s) to evaluate"),
-    judge_model: str = typer.Option("gpt-4o", "--judge-model", "-j", help="LLM judge model"),
-    db_path: Path = typer.Option("results.db", "--db", help="Results database path"),
-    update: bool = typer.Option(False, "--update", "-u", help="Update results in database"),
-):
-    """Re-run evaluation on existing results without re-running agents.
-
-    Useful for testing evaluator changes or re-evaluating with different criteria.
-    """
-    from .evaluators import evaluate_task, EvalResult
-    from .models import TaskResult, AgentResult
-
-    # Resolve universe path
-    universe_path = Path(universe)
-    if not universe_path.exists():
-        universe_path = Path("pet_to_wild/universes") / universe
-    if not universe_path.exists():
-        console.print(f"[red]Universe not found: {universe}[/red]")
-        raise typer.Exit(1)
-
-    # Load universe and tasks
-    universe_obj = load_universe(universe_path)
-    tasks_dir = universe_path / "tasks"
-    task_file_path = tasks_dir / f"{task_file}.yaml"
-    if not task_file_path.exists():
-        task_file_path = tasks_dir / f"{task_file}.yml"
-    if not task_file_path.exists():
-        console.print(f"[red]Task file not found: {task_file}.yaml[/red]")
-        raise typer.Exit(1)
-
-    tasks = load_tasks(task_file_path)
-    tasks_by_id = {t.task_id: t for t in tasks}
-
-    # Set up database
-    db = ResultsDB(db_path)
-
-    # Get run ID
-    if run_id is None:
-        run_id = db.get_latest_run()
-        if run_id is None:
-            console.print("[red]No runs found in database[/red]")
-            raise typer.Exit(1)
-    console.print(f"Re-evaluating run #{run_id}...")
-
-    # Get results to re-evaluate
-    all_results = db.get_run_results(run_id)
-    if not all_results:
-        console.print(f"[red]No results found for run #{run_id}[/red]")
-        raise typer.Exit(1)
-
-    # Filter by task_id and level if specified
-    task_ids = list(task_id) if task_id else None
-    levels = [lvl.upper() for lvl in level] if level else None
-
-    results_to_eval = []
-    for row in all_results:
-        if task_ids and row["task_id"] not in task_ids:
-            continue
-        if levels and row.get("autonomy_level", "L1") not in levels:
-            continue
-        if row["task_id"] not in tasks_by_id:
-            console.print(f"[yellow]Warning: Task {row['task_id']} not in task file, skipping[/yellow]")
-            continue
-        results_to_eval.append(row)
-
-    if not results_to_eval:
-        console.print("[red]No matching results to evaluate[/red]")
-        raise typer.Exit(1)
-
-    console.print(f"  Evaluating {len(results_to_eval)} result(s)...")
-
-    async def run_evals():
-        eval_results_list = []
-        for row in results_to_eval:
-            task = tasks_by_id[row["task_id"]]
-            autonomy_level = row.get("autonomy_level", "L1")
-
-            # Reconstruct TaskResult from stored data
-            task_result = TaskResult(
-                task_id=row["task_id"],
-                success=bool(row["success"]),
-                agent_answer=row["agent_answer"],
-                final_url=row.get("final_url"),
-                error=row.get("error"),
-                steps=row.get("steps", 0),
-                duration_seconds=row.get("duration_seconds", 0),
-                autonomy_level=autonomy_level,
-            )
-
-            # Get evaluation config
-            evaluation = task.get_evaluation_for_level(autonomy_level)
-
-            # Run evaluators
-            eval_results = await evaluate_task(
-                task_result,
-                evaluation,
-                task=task,
-                universe_name=universe_obj.name,
-                judge_model=judge_model,
-            )
-
-            eval_results_list.append({
-                "task_id": row["task_id"],
-                "level": autonomy_level,
-                "eval_results": eval_results,
-                "passed": all(e.passed for e in eval_results),
-            })
-
-        return eval_results_list
-
-    results = asyncio.run(run_evals())
-
-    # Display results
-    passed_count = sum(1 for r in results if r["passed"])
-    console.print(f"\n[bold]Evaluation Results:[/bold]")
-    console.print(f"  Passed: [green]{passed_count}[/green]/{len(results)}")
-
-    for r in results:
-        status = "[green]PASS[/green]" if r["passed"] else "[red]FAIL[/red]"
-        console.print(f"\n  Task {r['task_id']} ({r['level']}): {status}")
-        for e in r["eval_results"]:
-            eval_status = "[green]✓[/green]" if e.passed else "[red]✗[/red]"
-            console.print(f"    {eval_status} [{e.eval_type.value}] {e.details}")
-
-    # Update database if requested
-    if update:
-        console.print("\n[yellow]Updating database...[/yellow]")
-        for r in results:
-            eval_results_json = json.dumps([
-                {"type": e.eval_type.value, "passed": e.passed, "details": e.details}
-                for e in r["eval_results"]
-            ])
-            db.conn.execute(
-                """UPDATE task_results SET passed = ?, eval_results = ?
-                   WHERE run_id = ? AND task_id = ? AND autonomy_level = ?""",
-                (1 if r["passed"] else 0, eval_results_json, run_id, r["task_id"], r["level"]),
-            )
-        db.conn.commit()
-        console.print("[green]Database updated[/green]")
 
     db.close()
 
@@ -529,115 +457,206 @@ def mysql(
 
 @app.command()
 def benchmark(
-    universe: Path = typer.Argument(..., help="Path to universe directory"),
-    task_files: list[str] = typer.Option(..., "--task", "-t", help="Task file(s) to include"),
-    task_id: list[int] = typer.Option(None, "--id", "-i", help="Specific task IDs (optional)"),
-    model: list[str] = typer.Option(["google/gemini-2.5-flash-lite"], "--model", "-m", help="Model(s) to benchmark"),
-    harness: list[str] = typer.Option(["browser_use"], "--harness", "-H", help="Harness(es) to use"),
-    level: list[str] = typer.Option(["L1"], "--level", "-L", help="Autonomy level(s)"),
-    trials: int = typer.Option(1, "--trials", "-n", help="Trials per configuration"),
-    name: str = typer.Option(None, "--name", help="Benchmark name"),
-    output: Path = typer.Option(None, "--output", "-o", help="Output JSON file"),
-    headless: bool = typer.Option(True, help="Run headlessly"),
+    universe: list[str] = typer.Option(None, "--universe", "-u", help="Universe(s) to run (default: all)"),
+    multi_model: bool = typer.Option(False, "--multi-model", "-M", help="Run multi-model (heterogeneous) tasks only"),
+    config_file: Path = typer.Option(None, "--config", "-c", help="YAML config file"),
+    model: str = typer.Option("google/gemini-2.5-flash-lite", "--model", "-m", help="Agent model"),
+    judge_model: str = typer.Option("gpt-5.1", "--judge-model", "-j", help="LLM judge model"),
+    harness: str = typer.Option("browser_use", "--harness", "-H", help="Agent harness to use"),
+    headless: bool = typer.Option(True, help="Run browser headlessly"),
     max_steps: int = typer.Option(30, help="Max steps per task"),
-    timeout: int = typer.Option(120, help="Timeout per task"),
-    judge_model: str = typer.Option("gpt-4o", "--judge-model", help="LLM judge model"),
+    timeout: int = typer.Option(120, help="Timeout in seconds per task"),
+    level: list[str] = typer.Option(None, "--level", "-L", help="Autonomy level(s): L0, L1, L2"),
+    resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
 ):
-    """Run systematic benchmark across configurations."""
-    from .benchmark import BenchmarkConfig, BenchmarkRunner, generate_report
+    """Run benchmark suite across universes and tasks.
 
-    # Resolve universe path
-    universe_path = Path(universe)
-    if not universe_path.exists():
-        universe_path = Path("pet_to_wild/universes") / universe
-    if not universe_path.exists():
-        console.print(f"[red]Universe not found: {universe}[/red]")
-        raise typer.Exit(1)
-
-    # Check Zoo is running
-    zoo_config = ZooConfig(proxy_url=f"http://localhost:{proxy_port}")
-    zoo = Zoo(zoo_config)
-    if not zoo.is_running():
-        console.print("[red]Zoo is not running.[/red]")
-        raise typer.Exit(1)
-
-    # Validate autonomy levels
-    valid_levels = {"L0", "L1", "L2"}
-    autonomy_levels = [lvl.upper() for lvl in level]
-    invalid_levels = set(autonomy_levels) - valid_levels
-    if invalid_levels:
-        console.print(f"[red]Invalid autonomy level(s): {invalid_levels}. Valid: L0, L1, L2[/red]")
-        raise typer.Exit(1)
-
-    # Create benchmark config
-    benchmark_name = name or f"benchmark_{universe_path.name}_{len(task_files)}tasks"
-    config = BenchmarkConfig(
-        name=benchmark_name,
-        universe=str(universe_path),
-        task_files=task_files,
-        task_ids=list(task_id) if task_id else None,
-        models=list(model),
-        harnesses=list(harness),
-        autonomy_levels=autonomy_levels,
-        trials_per_config=trials,
-        max_steps=max_steps,
-        timeout_seconds=timeout,
-        headless=headless,
-        judge_model=judge_model,
-    )
-
-    # Run benchmark
-    runner = BenchmarkRunner(config, zoo)
-
-    async def execute():
-        return await runner.run(verbose=True)
-
-    results = asyncio.run(execute())
-
-    # Print summary
-    console.print("")
-    console.print(generate_report(results, format="text"))
-
-    # Save results
-    if output:
-        runner.save_results(output)
-        console.print(f"\n[green]Results saved to {output}[/green]")
+    By default runs all homogeneous (single-model) tasks in all universes.
+    Use --universe/-u to filter to specific universe(s).
+    Use --multi-model to run heterogeneous (multi-model) tasks instead.
+    """
+    # Load config from file or use CLI args
+    if config_file and config_file.exists():
+        config = BenchmarkConfig.from_yaml(config_file)
     else:
-        # Auto-save with timestamp
-        timestamp = results.started_at.replace(":", "-").replace("T", "_")[:19]
-        auto_output = Path(f"benchmark_{timestamp}.json")
-        runner.save_results(auto_output)
-        console.print(f"\n[green]Results saved to {auto_output}[/green]")
+        config = BenchmarkConfig(
+            model=model,
+            judge_model=judge_model,
+            harness=harness,
+            headless=headless,
+            max_steps=max_steps,
+            timeout=timeout,
+            autonomy_levels=level if level else list(AUTONOMY_LEVELS),
+            proxy_port=proxy_port,
+        )
 
-
-@app.command("benchmark-report")
-def benchmark_report(
-    results_file: Path = typer.Argument(..., help="Benchmark results JSON file"),
-    format: str = typer.Option("text", "--format", "-f", help="Output format: text, markdown"),
-):
-    """Generate report from benchmark results."""
-    from .benchmark import BenchmarkConfig, BenchmarkResults, TrialResult, generate_report
-
-    if not results_file.exists():
-        console.print(f"[red]Results file not found: {results_file}[/red]")
+    universes_filter = list(universe) if universe else None
+    result = asyncio.run(run_benchmark(config, multi_model=multi_model, resume=resume, universes=universes_filter))
+    if result is None:
         raise typer.Exit(1)
 
-    with open(results_file) as f:
-        data = json.load(f)
 
-    # Reconstruct BenchmarkResults
-    config = BenchmarkConfig(**data["config"])
-    trials = [TrialResult(**t) for t in data["trials"]]
-    results = BenchmarkResults(
-        config=config,
-        trials=trials,
-        started_at=data.get("started_at", ""),
-        finished_at=data.get("finished_at", ""),
-        total_duration_seconds=data.get("total_duration_seconds", 0),
-    )
+@app.command()
+def create_universe(
+    name: str = typer.Argument(..., help="Name of the new universe"),
+    path: Path = typer.Option(
+        None, "--path", "-p", help="Parent directory (default: pet_to_wild/universes)"
+    ),
+):
+    """Create scaffolding for a new universe."""
+    # Determine parent directory
+    if path is None:
+        parent = Path("pet_to_wild/universes")
+    else:
+        parent = Path(path)
 
-    console.print(generate_report(results, format=format))
+    if not parent.exists():
+        console.print(f"[red]Parent directory not found: {parent}[/red]")
+        raise typer.Exit(1)
+
+    universe_dir = parent / name
+    if universe_dir.exists():
+        console.print(f"[red]Universe already exists: {universe_dir}[/red]")
+        raise typer.Exit(1)
+
+    # Create directory structure
+    universe_dir.mkdir()
+    (universe_dir / "tasks").mkdir()
+    (universe_dir / "scenes").mkdir()
+    (universe_dir / "fixtures").mkdir()
+    (universe_dir / "scripts").mkdir()  # For complex logic only
+    (universe_dir / "custom_evaluators").mkdir()
+
+    # Create __init__.py for Python package
+    (universe_dir / "__init__.py").write_text("")
+
+    # Create config.yaml
+    config_content = f"""name: {name}
+sites:
+  - snappymail.zoo
+  # Add more sites as needed: gitea.zoo, focalboard.zoo, wiki.zoo, etc.
+
+services:
+  snappymail.zoo:
+    - stalwart
+    - snappymail-zoo
+  _core:
+    - proxy
+    - coredns
+    - caddy
+    - postgres
+    - mysql
+    - redis
+
+agents:
+  - role: user
+    name: agent
+    persona: ""
+    goal: ""
+"""
+    (universe_dir / "config.yaml").write_text(config_content)
+
+    # Create custom_evaluators/__init__.py
+    evaluators_init = '''"""Custom evaluation functions for this universe.
+
+Each function should:
+- Accept a TaskResult as its only parameter
+- Return an EvalResult
+
+Example:
+    from zoo_eval.evaluators import EvalResult
+    from zoo_eval.models import EvalType, TaskResult
+
+    def my_check(result: TaskResult) -> EvalResult:
+        if "expected" in result.page_content:
+            return EvalResult(passed=True, eval_type=EvalType.CUSTOM_FUNCTION, details="OK")
+        return EvalResult(passed=False, eval_type=EvalType.CUSTOM_FUNCTION, details="Failed")
+"""
+
+__all__ = []
+'''
+    (universe_dir / "custom_evaluators" / "__init__.py").write_text(evaluators_init)
+
+    # Create example task file
+    example_task = f"""# Example task file for {name} universe
+# See docs/benchmark_guide.md for full reference
+
+- id: 1
+  sites:
+    - snappymail.zoo
+  intent: "Example task description"
+  start_url: "https://snappymail.zoo"
+  compatible_universes:
+    - {name}
+  require_reset: false
+  complexity: atomic
+  environment: domesticated
+
+  agents:
+    agent:
+      require_login: true
+      autonomy_levels:
+        L0: "Step-by-step instructions"
+        L1: "Goal with method hint"
+        L2: "Goal only"
+
+  eval:
+    types:
+      - string_match
+    answers:
+      must_include:
+        - expected_string
+"""
+    (universe_dir / "tasks" / "example.yaml").write_text(example_task)
+
+    # Create example scene file
+    example_scene = f"""# Example scene for {name} universe
+# See docs/authoring-scenes.md for full reference
+
+name: example_scene
+description: "Example scene with email action"
+
+setup:
+  # Email action - credentials resolved from credentials/snappymail.zoo.yaml
+  - type: email
+    from: bob                    # Agent name from credentials file
+    to: alice@snappymail.zoo
+    subject: Test email
+    body: |
+      Hi Alice,
+      This is a test email from the example scene.
+      Best,
+      Bob
+
+  # For large content, use fixtures:
+  # - type: gitea.file
+  #   owner: bob
+  #   repo: my-repo
+  #   path: main.py
+  #   content_file: fixtures/example_scene/main.py
+
+# Triggered actions (run during task execution)
+# actions:
+#   - trigger:
+#       type: request
+#       url_contains: "gitea.zoo"
+#       method: POST
+#     type: email
+#     from: bob
+#     to: alice@snappymail.zoo
+#     subject: Action triggered!
+#     body: This email was sent when you made a POST to gitea.
+"""
+    (universe_dir / "scenes" / "example_scene.yaml").write_text(example_scene)
+
+    console.print(f"[green]Created universe: {universe_dir}[/green]")
+    console.print(f"  config.yaml        - Universe configuration")
+    console.print(f"  tasks/             - Task YAML files (example.yaml included)")
+    console.print(f"  scenes/            - Scene definitions (example_scene.yaml included)")
+    console.print(f"  fixtures/          - Content files for scenes")
+    console.print(f"  scripts/           - Complex logic scripts (use sparingly)")
+    console.print(f"  custom_evaluators/ - Custom evaluation functions")
 
 
 if __name__ == "__main__":

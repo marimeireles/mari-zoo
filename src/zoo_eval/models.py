@@ -10,6 +10,11 @@ from typing import Any
 
 import yaml
 
+# Shared constants for autonomy levels, environments, and complexities
+AUTONOMY_LEVELS = ["L0", "L1", "L2"]
+ENVIRONMENTS = ["domesticated", "tame", "wild"]
+COMPLEXITIES = ["atomic", "compositional", "open_ended"]
+
 
 class AgentHarness(str, Enum):
     """Agent execution harness."""
@@ -28,13 +33,16 @@ class RunConfig:
     save_traces: bool = True
     trace_dir: str = "./traces"
     model: str = "google/gemini-2.5-flash-lite"  # Model for agent (auto-detects provider)
-    judge_model: str = "gpt-4o"  # Model for LLM judge evaluation (auto-detects provider)
+    judge_model: str = "gpt-5.1"  # Model for LLM judge evaluation (auto-detects provider)
     shared_browser: bool = False  # If True, all agents share the same browser and memory
-    autonomy_levels: list[str] = field(default_factory=lambda: ["L1"])  # Which levels to run (L0, L1, L2)
+    autonomy_levels: list[str] = field(default_factory=lambda: list(AUTONOMY_LEVELS))  # Which levels to run
     completed_pairs: set[tuple[int, str]] = field(default_factory=set)  # (task_id, level) pairs to skip (for resume)
     harness: AgentHarness = AgentHarness.BROWSER_USE  # Which agent harness to use
     claude_model: str = "sonnet"  # Claude model for Claude SDK harness ("opus", "sonnet", "haiku")
     skip_zoo_reset: bool = False  # If True, skip Docker restart/reset (assume services are ready)
+    # Proxy-based event source configuration (harness-agnostic scene triggers)
+    use_proxy_events: bool = False  # Use Redis pub/sub for scene triggers (required for request triggers)
+    redis_url: str = "redis://localhost:6379"  # Redis URL for proxy event source
 
 
 class EvalType(str, Enum):
@@ -45,6 +53,48 @@ class EvalType(str, Enum):
     LLM_JUDGE = "llm_judge"
     HUMAN_CRITIC = "human_critic"
     CUSTOM_FUNCTION = "custom_function"  # User-defined Python function for custom evaluation logic
+
+
+@dataclass
+class Subtask:
+    """A subtask within a compositional task for granular scoring.
+
+    Subtasks allow breaking down complex tasks into verifiable checkpoints.
+    Each subtask has a binary pass/fail, and the task score is computed as:
+    score = sum(passed_subtask_weights) / sum(all_weights)
+    """
+
+    id: str  # Unique identifier (e.g., "login", "create_fix")
+    description: str  # What this subtask verifies
+    weight: int = 1  # Importance weight (default: 1)
+    eval_type: EvalType = EvalType.LLM_JUDGE  # How to evaluate this subtask
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Subtask:
+        eval_type = EvalType.LLM_JUDGE
+        if data.get("eval_type"):
+            try:
+                eval_type = EvalType(data["eval_type"])
+            except ValueError:
+                pass  # Default to LLM_JUDGE
+        return cls(
+            id=data.get("id", ""),
+            description=data.get("description", ""),
+            weight=data.get("weight", 1),
+            eval_type=eval_type,
+        )
+
+
+@dataclass
+class SubtaskResult:
+    """Result of evaluating a single subtask."""
+
+    subtask_id: str
+    description: str
+    weight: int
+    passed: bool  # Binary pass/fail
+    evidence: str = ""  # Explanation from evaluator
+    eval_type: EvalType = EvalType.LLM_JUDGE
 
 
 class TaskComplexity(str, Enum):
@@ -68,7 +118,8 @@ class ReferenceAnswers:
     """Expected answers for string matching."""
 
     exact_match: str | None = None
-    must_include: list[str] = field(default_factory=list)
+    must_include: list[str] = field(default_factory=list)  # ALL must be present
+    must_include_any: list[str] = field(default_factory=list)  # ANY ONE must be present
 
     @classmethod
     def from_dict(cls, data: dict | None) -> ReferenceAnswers | None:
@@ -77,6 +128,7 @@ class ReferenceAnswers:
         return cls(
             exact_match=data.get("exact_match"),
             must_include=data.get("must_include", []),
+            must_include_any=data.get("must_include_any", []),
         )
 
 
@@ -124,55 +176,96 @@ class Trigger:
 
     Trigger types:
     - time: Activate after a delay (seconds)
-    - event: Activate when a Matomo event is detected
+    - request: Activate when agent makes HTTP request matching pattern (via proxy events)
+    - poll: Activate when a condition is met (checked periodically)
     - page_load: Activate immediately before agent starts
 
-    Event trigger fields (for type="event"):
-    - site: Zoo site domain (e.g., 'gitea.zoo')
-    - event_category: Matomo event category (e.g., 'AJAX', 'Button', 'Form')
-    - event_match: Text to match in event name (case-insensitive)
-    - timeout: Max seconds to wait for event (default: 600)
+    Request trigger fields (for type="request"):
+    - url_contains: Substring to match in request URL (case-insensitive)
+    - url_pattern: Regex pattern to match request URL
+    - method: HTTP method to match (GET, POST, etc.) - optional
+    - wait_for_load: Wait for page load event after URL match (default: True)
+
+    Poll trigger fields (for type="poll"):
+    - poll_endpoint: URL to check periodically
+    - poll_contains: Text that must appear in response for trigger to fire
+    - poll_interval: Seconds between checks (default: 3)
+
+    Common fields:
+    - timeout: Max seconds to wait for trigger (default: 600)
     """
 
-    trigger_type: str  # "time" | "event" | "page_load"
+    trigger_type: str  # "time" | "request" | "poll" | "page_load"
     delay: int | None = None  # For time triggers: seconds after task starts
-    # Event trigger fields
-    site: str | None = None  # Zoo site domain
-    event_category: str | None = None  # Matomo event category
-    event_match: str | None = None  # Text to match in event name
-    timeout: float = 600.0  # Max seconds to wait for event triggers (default: 10 minutes)
+    # Request trigger fields
+    url_contains: str | None = None  # Substring to match in URL
+    url_pattern: str | None = None  # Regex pattern to match URL
+    method: str | None = None  # HTTP method to match (GET, POST, etc.)
+    wait_for_load: bool = True  # Wait for page load after URL match (default: True)
+    # Poll trigger fields
+    poll_endpoint: str | None = None  # URL to check
+    poll_contains: str | None = None  # Text to look for in response
+    poll_interval: float = 3.0  # Seconds between polls
+    # Common
+    timeout: float = 600.0  # Max seconds to wait (default: 10 minutes)
 
     @classmethod
     def from_dict(cls, data: dict) -> Trigger:
         return cls(
             trigger_type=data.get("type", "time"),
             delay=data.get("delay"),
-            site=data.get("site"),
-            event_category=data.get("event_category"),
-            event_match=data.get("event_match"),
+            url_contains=data.get("url_contains"),
+            url_pattern=data.get("url_pattern"),
+            method=data.get("method"),
+            wait_for_load=data.get("wait_for_load", True),
+            poll_endpoint=data.get("poll_endpoint"),
+            poll_contains=data.get("poll_contains"),
+            poll_interval=data.get("poll_interval", 3.0),
             timeout=data.get("timeout", 600.0),
         )
 
 
 @dataclass
 class ActionPayload:
-    """Action that runs as part of a scene.
+    """Action that runs as part of a scene. See docs/authoring-scenes.md for action types."""
 
-    Actions are scripts or commands that execute during a scene. They can run:
-    - In setup: before the task starts (e.g., seeding a database, creating repos)
-    - On triggers: during task execution when conditions are met (e.g., sending an email)
-    """
-
-    action_type: str  # "script"
-    script_path: str = ""  # Path to Python script to execute
-    description: str = ""  # Optional description of the action
+    action_type: str  # "script", "email", "gitea.repo", etc.
+    data: dict = field(default_factory=dict)  # Action-specific fields
+    description: str = ""
+    trigger: Trigger | None = None
+    script_path: str = ""  # Legacy: for script actions
 
     @classmethod
     def from_dict(cls, data: dict) -> ActionPayload:
+        trigger = None
+        if data.get("trigger"):
+            trigger = Trigger.from_dict(data["trigger"])
+
+        action_type = data.get("type", "script")
+        known_fields = {"type", "trigger", "script_path"}
+        action_data = {k: v for k, v in data.items() if k not in known_fields}
+
         return cls(
-            action_type=data.get("type", "script"),
-            script_path=data.get("script_path", ""),
+            action_type=action_type,
+            data=action_data,
             description=data.get("description", ""),
+            trigger=trigger,
+            script_path=data.get("script_path", ""),
+        )
+
+
+@dataclass
+class AgentTrigger:
+    """Defines when an agent should be spawned during a scene."""
+
+    name: str  # Agent name (must match agent defined in task)
+    trigger: Trigger  # When to spawn this agent
+
+    @classmethod
+    def from_dict(cls, data: dict) -> AgentTrigger:
+        return cls(
+            name=data.get("name", ""),
+            trigger=Trigger.from_dict(data.get("trigger", {})),
         )
 
 
@@ -182,15 +275,26 @@ class Scene:
 
     Scenes define what happens before and during a task:
     - setup: Actions that run before the task starts (seeding data)
-    - triggers: Conditions that activate actions during execution
-    - actions: What runs when triggers fire
+    - actions: Scripts with their own triggers that run during execution
+    - agents: Agent spawns with their own triggers
     """
 
     name: str
     description: str = ""
+    requires_proxy: bool = False  # Explicitly declare if scene needs proxy events
     setup: list[ActionPayload] = field(default_factory=list)
-    triggers: list[Trigger] = field(default_factory=list)
     actions: list[ActionPayload] = field(default_factory=list)
+    agents: list[AgentTrigger] = field(default_factory=list)
+
+    @property
+    def needs_proxy_events(self) -> bool:
+        """Check if this scene needs proxy infrastructure (explicit or from request triggers)."""
+        if self.requires_proxy:
+            return True
+        for action in self.actions:
+            if action.trigger and action.trigger.trigger_type == "request":
+                return True
+        return False
 
     @classmethod
     def from_dict(cls, data: dict | None) -> Scene | None:
@@ -199,15 +303,21 @@ class Scene:
         return cls(
             name=data.get("name", ""),
             description=data.get("description", ""),
+            requires_proxy=data.get("requires_proxy", False),
             setup=[ActionPayload.from_dict(s) for s in data.get("setup", [])],
-            triggers=[Trigger.from_dict(t) for t in data.get("triggers", [])],
             actions=[ActionPayload.from_dict(a) for a in data.get("actions", [])],
+            agents=[AgentTrigger.from_dict(ag) for ag in data.get("agents", [])],
         )
 
 
 @dataclass
 class Evaluation:
-    """Evaluation criteria for a task."""
+    """Evaluation criteria for a task.
+
+    For compositional tasks, use `subtasks` for granular scoring.
+    If subtasks are defined, the task score is computed from subtask pass/fail.
+    If no subtasks, the existing eval_types determine a single pass/fail (score 0 or 1).
+    """
 
     eval_types: list[EvalType]
     reference_answers: ReferenceAnswers | None = None
@@ -215,7 +325,8 @@ class Evaluation:
     program_html: list[HTMLCheck] = field(default_factory=list)
     db_query: DBQuery | None = None
     llm_judge_criteria: list[str] = field(default_factory=list)
-    custom_function: str | None = None  # Path to custom evaluation function (e.g., "custom_evaluators.email_checker")
+    custom_function: str | None = None  # Path to custom evaluation function
+    subtasks: list[Subtask] = field(default_factory=list)  # For granular scoring
 
     @classmethod
     def from_dict(cls, data: dict) -> Evaluation:
@@ -233,6 +344,9 @@ class Evaluation:
                 valid = [e.value for e in EvalType]
                 raise ValueError(f"Invalid eval type '{t}'. Valid: {valid}")
 
+        # Parse subtasks
+        subtasks = [Subtask.from_dict(s) for s in data.get("subtasks", [])]
+
         return cls(
             eval_types=eval_types,
             reference_answers=ReferenceAnswers.from_dict(data.get("answers")),
@@ -241,6 +355,7 @@ class Evaluation:
             db_query=DBQuery.from_dict(data.get("db_query")),
             llm_judge_criteria=data.get("llm_judge_criteria", []),
             custom_function=data.get("custom_function"),
+            subtasks=subtasks,
         )
 
 
@@ -252,14 +367,16 @@ class AgentConfig:
     name: str
     persona: str
     goal: str  # Individual agent's goal
+    model: str | None = None  # Model override for this agent (overrides CLI default)
 
     @classmethod
     def from_dict(cls, data: dict) -> AgentConfig:
         return cls(
-            role=data["role"],
-            name=data["name"],
-            persona=data["persona"],
-            goal=data["goal"],
+            role=data.get("role", "agent"),
+            name=data.get("name", "unnamed"),
+            persona=data.get("persona", ""),
+            goal=data.get("goal", ""),
+            model=data.get("model"),
         )
 
 
@@ -273,6 +390,7 @@ class TaskAgentConfig:
     password: str | None = None
     autonomy_levels: dict[str, str] = field(default_factory=dict)
     context: str | None = None  # Agent-specific context (e.g., calendar constraints)
+    model: str | None = None  # Model override for this agent (highest priority, overrides universe and CLI)
 
     @classmethod
     def from_dict(cls, name: str, data: dict) -> TaskAgentConfig:
@@ -283,6 +401,7 @@ class TaskAgentConfig:
             password=data.get("password"),
             autonomy_levels=data.get("autonomy_levels", {}),
             context=data.get("context"),
+            model=data.get("model"),
         )
 
 
@@ -298,7 +417,14 @@ class Universe:
     @classmethod
     def from_dict(cls, data: dict) -> Universe:
         agents_data = data.get("agents", [])
-        agents = [AgentConfig.from_dict(a) for a in agents_data]
+        # Handle both list and dict formats for agents
+        if isinstance(agents_data, dict):
+            agents = [
+                AgentConfig.from_dict({"name": name, **agent_data})
+                for name, agent_data in agents_data.items()
+            ]
+        else:
+            agents = [AgentConfig.from_dict(a) for a in agents_data]
 
         return cls(
             name=data["name"],
@@ -368,6 +494,14 @@ class Task:
     scene_name: str | None = None  # References scene file by name
     # Multi-agent coordination
     coordination: CoordinationConfig = field(default_factory=CoordinationConfig)
+    sensitive_data: str | None = None  # Bait data for injection resistance testing
+
+    def get_available_levels(self) -> set[str]:
+        """Get the set of autonomy levels defined across all agents."""
+        levels = set()
+        for agent in self.agents.values():
+            levels.update(agent.autonomy_levels.keys())
+        return levels
 
     def get_evaluation_for_level(self, autonomy_level: str) -> Evaluation:
         """Get the evaluation criteria for a specific autonomy level.
@@ -432,6 +566,7 @@ class Task:
             environment=environment,
             scene_name=data.get("scene"),
             coordination=CoordinationConfig.from_dict(data.get("coordination")),
+            sensitive_data=data.get("sensitive_data"),
         )
 
 
@@ -453,10 +588,15 @@ class AgentResult:
 
 @dataclass
 class TaskResult:
-    """Result from running a task."""
+    """Result from running a task.
+
+    Score is the primary metric (0.0-1.0), computed from subtask results.
+    If no subtasks, score is 0.0 or 1.0 based on evaluation pass/fail.
+    """
 
     task_id: int
-    success: bool
+    score: float = 0.0  # 0.0-1.0, computed from subtasks
+    subtask_results: list[SubtaskResult] = field(default_factory=list)
     agent_results: list[AgentResult] = field(default_factory=list)
     agent_answer: str | None = None  # Combined answer from all agents
     final_url: str | None = None
@@ -471,16 +611,20 @@ class TaskResult:
     scene_name: str | None = None  # Name of scene that was activated
 
 
-def load_tasks(path: Path, limit: int | None = None) -> list[Task]:
-    """Load tasks from a JSON or YAML file."""
+def _load_yaml_or_json(path: Path) -> Any:
+    """Load data from a YAML or JSON file based on extension."""
     with open(path) as f:
         if path.suffix in (".yaml", ".yml"):
-            data = yaml.safe_load(f)
-            # YAML format wraps tasks in a 'tasks' key
-            if isinstance(data, dict) and "tasks" in data:
-                data = data["tasks"]
-        else:
-            data = json.load(f)
+            return yaml.safe_load(f)
+        return json.load(f)
+
+
+def load_tasks(path: Path, limit: int | None = None) -> list[Task]:
+    """Load tasks from a JSON or YAML file."""
+    data = _load_yaml_or_json(path)
+    # YAML format wraps tasks in a 'tasks' key
+    if isinstance(data, dict) and "tasks" in data:
+        data = data["tasks"]
 
     tasks = [Task.from_dict(t) for t in data]
     if limit:
@@ -504,24 +648,12 @@ def load_universe(path: Path) -> Universe:
             raise FileNotFoundError(f"No config.yaml found in universe directory: {path}")
         path = config_path
 
-    with open(path) as f:
-        if path.suffix in (".yaml", ".yml"):
-            data = yaml.safe_load(f)
-        else:
-            data = json.load(f)
-
-    return Universe.from_dict(data)
+    return Universe.from_dict(_load_yaml_or_json(path))
 
 
 def load_scene(path: Path) -> Scene:
     """Load a scene from a YAML file."""
-    with open(path) as f:
-        if path.suffix in (".yaml", ".yml"):
-            data = yaml.safe_load(f)
-        else:
-            data = json.load(f)
-
-    scene = Scene.from_dict(data)
+    scene = Scene.from_dict(_load_yaml_or_json(path))
     if scene is None:
         raise ValueError(f"Failed to load scene from {path}")
     return scene

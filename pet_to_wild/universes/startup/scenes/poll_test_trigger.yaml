@@ -1,0 +1,22 @@
+name: poll_test_trigger
+description: "Test poll trigger - sends email when agent creates a Gitea issue"
+
+setup:
+  - type: gitea.repo
+    owner: alice
+    name: test-repo
+    description: Test repository for poll trigger
+
+actions:
+  - trigger:
+      type: poll
+      poll_endpoint: "https://gitea.zoo/api/v1/repos/alice/test-repo/issues"
+      poll_contains: "test issue"
+      poll_interval: 2
+      timeout: 120
+    type: email
+    from: bob
+    to: alice@snappymail.zoo
+    subject: Test email from poll trigger
+    description: "Send email when issue is detected"
+    body: This is a test email sent because an issue was detected in test-repo.

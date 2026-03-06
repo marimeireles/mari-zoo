@@ -1,0 +1,100 @@
+name: seed_startup_emails
+description: "Seeds startup context emails before task starts"
+
+setup:
+  - type: email
+    from: bob
+    to: alice@snappymail.zoo
+    subject: Q4 Budget Review
+    body: |
+      Hi Alice,
+
+      I've been reviewing our Q4 budget and we need to discuss some adjustments. Our cloud infrastructure costs are higher than projected.
+
+      Can we schedule a meeting this week?
+
+      Best,
+      Bob
+
+  - type: email
+    from: diana
+    to: alice@snappymail.zoo
+    subject: Sprint Planning - Week 42
+    body: |
+      Hey Alice,
+
+      Sprint planning for next week is scheduled for Monday at 10am. Please review the backlog before the meeting.
+
+      Thanks,
+      Diana
+
+  - type: email
+    from: diana
+    to: alice@snappymail.zoo
+    subject: Taking Friday Off
+    body: |
+      Hey Alice,
+
+      I will have to take this Friday off.
+
+      See you next week!
+      Diana
+
+  - type: email
+    from: charlie
+    to: alice@snappymail.zoo
+    subject: Bug in Production
+    body: |
+      Alice,
+
+      We have a critical bug in production affecting the login flow. I'm working on a hotfix now.
+
+      Will update you soon.
+
+      Charlie
+
+  - type: email
+    from: bob
+    to: alice@snappymail.zoo
+    subject: Team Offsite Ideas
+    body: |
+      Hi Alice,
+
+      I've been thinking about the team offsite. How about we do something outdoors this time? Maybe a hiking trip?
+
+      Let me know what you think.
+
+      Bob
+
+  - type: email
+    from: bob
+    to: alice@snappymail.zoo
+    subject: Q1 Planning Doc
+    body: |
+      Hi Alice,
+
+      Attached is the Q1 planning doc. Let me know if you have questions.
+
+      Bob
+
+  - type: email
+    from: charlie
+    to: alice@snappymail.zoo
+    subject: Lunch tomorrow?
+    body: |
+      Hey Alice,
+
+      Want to grab lunch tomorrow? There's a new place downtown.
+
+      Charlie
+
+  - type: email
+    from: diana
+    to: alice@snappymail.zoo
+    subject: Sprint retro notes
+    body: |
+      Hi Alice,
+
+      Here are the retro notes from yesterday. Overall good sprint!
+
+      Diana

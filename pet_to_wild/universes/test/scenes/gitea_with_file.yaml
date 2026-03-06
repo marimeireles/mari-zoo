@@ -1,0 +1,13 @@
+name: gitea_with_file
+description: "Creates a repo with README file"
+
+setup:
+  - type: gitea.repo
+    owner: alice
+    name: test-repo
+    description: "Test repository"
+  - type: gitea.file
+    owner: alice
+    repo: test-repo
+    path: README.md
+    content: "# Hello\n\nThis is a test repository for API testing."

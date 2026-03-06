@@ -6,19 +6,19 @@ sites:
   - wiki.zoo
   - auth.zoo
 
-# Map task site names to Docker service names for health checks
+# Map site domains to Docker service names for health checks
 services:
-  mail:
+  snappymail.zoo:
     - stalwart
     - snappymail-zoo
-  gitea:
+  gitea.zoo:
     - gitea-zoo
-  focalboard:
+  focalboard.zoo:
     - focalboard-zoo
-  auth:
+  auth.zoo:
     - auth-zoo
     - hydra
-  wiki:
+  wiki.zoo:
     - wiki-zoo
   # Core services always needed
   _core:
@@ -28,6 +28,7 @@ services:
     - postgres
     - mysql
     - redis
+    - analytics-zoo
 
 agents:
   - role: cofounder

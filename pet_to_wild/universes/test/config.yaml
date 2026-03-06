@@ -1,0 +1,28 @@
+name: test
+description: "API testing universe - atomic tests for all zoo services"
+
+sites:
+  - auth.zoo
+  - gitea.zoo
+  - snappymail.zoo
+  - focalboard.zoo
+  - postmill.zoo
+  - onestopshop.zoo
+  - wiki.zoo
+
+services:
+  auth-zoo: auth.zoo
+  gitea-zoo: gitea.zoo
+  snappymail-zoo: snappymail.zoo
+  focalboard-zoo: focalboard.zoo
+  postmill: postmill.zoo
+  onestopshop: onestopshop.zoo
+  wiki-zoo: wiki.zoo
+
+agents:
+  alice:
+    role: tester
+    persona: "Test user Alice for API validation"
+  bob:
+    role: tester
+    persona: "Test user Bob for multi-user tests"

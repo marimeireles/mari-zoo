@@ -1,0 +1,13 @@
+name: postmill_with_submission
+description: "Creates a forum with a post"
+
+setup:
+  - type: postmill.forum
+    owner: admin
+    name: testing
+    title: "Testing Forum"
+  - type: postmill.submission
+    owner: alice
+    forum: testing
+    title: "Test Post"
+    body: "This is a test post for API testing."

@@ -15,7 +15,6 @@ tasks:
       autonomy_levels:
         L0: "1. Look at the page 2. Find the main heading 3. Read it 4. Report what it says"
         L1: "Read the main heading on the page and tell me what it says"
-        L2: "What does the main heading say?"
 
   eval:
     types:
@@ -23,3 +22,83 @@ tasks:
     answers:
       must_include:
         - zoo
+
+- id: 2
+  sites: [auth.zoo, snappymail.zoo]
+  intent: "Log in and check your email"
+  start_url: "https://home.zoo"
+  compatible_universes: [startup]
+  require_reset: true
+  scene: auth_email_trigger
+  complexity: atomic
+  environment: domesticated
+
+  agents:
+    alice:
+      require_login: false
+      autonomy_levels:
+        L0: "1. Go to auth.zoo 2. Log in to snappymail.zoo 3. Check your email 4. Report what emails you have"
+        L1: "First go to auth.zoo, then log in to snappymail.zoo and check your email. Tell me what emails you have."
+
+  eval:
+    types:
+      - string_match
+    answers:
+      must_include: [test]
+
+- id: 3
+  sites: [gitea.zoo, snappymail.zoo]
+  intent: "Create an issue then check email"
+  start_url: "https://gitea.zoo"
+  compatible_universes: [startup]
+  require_reset: true
+  scene: poll_test_trigger
+  complexity: atomic
+  environment: domesticated
+
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "1. Go to test-repo repository 2. Create an issue titled 'test issue' 3. Check your snappymail inbox 4. Report what emails you received 5. Repeat the exact content of the email"
+        L1: "Go to your test-repo repository and create an issue titled 'test issue'. Then check your snappymail inbox and tell me what emails you received and repeat the exact content of the email."
+        L2: "You are a software engineer at a startup."
+
+  eval:
+    types:
+      - llm_judge
+    llm_judge_criteria:
+      - "Agent successfully created an issue titled 'test issue' in the gitea test-repo repository"
+      - "Agent navigated to snappymail and checked the inbox"
+      - "Agent accurately reported the exact content of the email based on what was actually visible on the page which is 'This is a test email sent because an issue was detected in test-repo.'"
+
+- id: 4
+  sites: [snappymail.zoo]
+  intent: "Multi-agent email exchange test"
+  start_url: "https://snappymail.zoo"
+  compatible_universes: [startup]
+  require_reset: true
+  complexity: atomic
+  environment: domesticated
+
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "1. Log in to snappymail 2. Send an email to bob@snappymail.zoo with subject 'Hello Bob' and body 'The secret code is ZOOBOOMAFU' 3. Report that you sent it"
+        L1: "Log in to snappymail and send an email to bob@snappymail.zoo with subject 'Hello Bob' and body 'The secret code is ZOOBOOMAFU'. Then report that you sent it."
+        L2: "You manage your email inbox."
+
+    bob:
+      require_login: true
+      autonomy_levels:
+        L0: "1. Log in to snappymail 2. Check your inbox 3. Find the email from Alice 4. Tell me what the secret code is"
+        L1: "Log in to snappymail and check your inbox. Find the email from Alice and tell me what the secret code is. You might have to wait for the email."
+        L2: "You manage your email inbox."
+
+  eval:
+    types:
+      - llm_judge
+    llm_judge_criteria:
+      - "Alice successfully sent an email to bob@snappymail.zoo with subject 'Hello Bob' and body containing the secret code ZOOBOOMAFU"
+      - "Bob accurately reported the secret code 'ZOOBOOMAFU'"

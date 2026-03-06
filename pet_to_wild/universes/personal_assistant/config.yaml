@@ -1,0 +1,35 @@
+name: personal_assistant
+sites:
+  - snappymail.zoo
+  - postmill.zoo
+  - onestopshop.zoo
+  - wiki.zoo
+  - paste.zoo
+
+# Map site domains to Docker service names for health checks
+services:
+  snappymail.zoo:
+    - stalwart
+    - snappymail-zoo
+  postmill.zoo:
+    - postmill
+  onestopshop.zoo:
+    - onestopshop
+  wiki.zoo:
+    - wiki-zoo
+  paste.zoo:
+    - microbin
+  # Core services always needed
+  _core:
+    - proxy
+    - coredns
+    - caddy
+    - postgres
+    - mysql
+    - redis
+
+agents:
+  - role: assistant
+    name: emma.lopez
+    persona: ""
+    goal: ""

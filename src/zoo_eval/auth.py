@@ -13,18 +13,9 @@ class Credential:
     """Login credential for a site."""
     username: str
     password: str
+    agent: str = ""  # Maps to universe agent name (e.g., "alice")
     note: str = ""
 
-
-# Site name mapping from task config to Zoo domain
-SITE_TO_DOMAIN = {
-    "shopping": "onestopshop.zoo",
-    "shopping_admin": "onestopshop.zoo",
-    "reddit": "postmill.zoo",
-    "gitlab": "gitea.zoo",
-    "wikipedia": "wiki.zoo",
-    "mail": "snappymail.zoo",
-}
 
 @dataclass
 class SiteCredentials:
@@ -66,6 +57,7 @@ def load_credentials(credentials_dir: Path | None = None) -> dict[str, SiteCrede
                 Credential(
                     username=u["username"],
                     password=u["password"],
+                    agent=u.get("agent", ""),
                     note=u.get("note", ""),
                 )
                 for u in cred_data
@@ -79,49 +71,58 @@ def load_credentials(credentials_dir: Path | None = None) -> dict[str, SiteCrede
     return _credentials_cache
 
 
-def get_credential_for_site(site: str) -> Credential | None:
-    """Get the appropriate credential for a site.
+def get_credential(site: str, agent: str) -> Credential:
+    """Get credential for an agent on a site.
 
     Args:
-        site: Site name from task config (e.g., 'shopping_admin')
+        site: Site name (e.g., "gitea.zoo" or "gitea")
+        agent: Agent name (e.g., "bob")
 
     Returns:
-        Credential or None if not found
+        Credential object with username, password, etc.
+
+    Raises:
+        KeyError: If agent not found for site
+
+    Example:
+        >>> cred = get_credential("gitea", "bob")
+        >>> cred.password
+        'bob123'
     """
+    # Normalize site name
+    if not site.endswith(".zoo"):
+        site = f"{site}.zoo"
+
     creds = load_credentials()
-
-    # Map task site name to Zoo domain
-    domain = SITE_TO_DOMAIN.get(site, site)
-    is_admin = site.endswith("_admin")
-
-    site_creds = creds.get(domain)
+    site_creds = creds.get(site)
     if not site_creds:
-        return None
+        raise KeyError(f"Site '{site}' not found in credentials")
 
-    # Use admin creds for admin sites, otherwise regular users
-    if is_admin and site_creds.admin:
-        return site_creds.admin[0]
-    elif site_creds.users:
-        return site_creds.users[0]
+    for cred in site_creds.users:
+        if cred.agent == agent:
+            return cred
 
-    return None
+    raise KeyError(f"Agent '{agent}' not found for site '{site}'")
 
 
-def get_login_hint(sites: list[str]) -> str:
-    """Generate login hint text for the agent.
+def get_credentials_for_agent(agent_name: str, allowed_sites: list[str]) -> str:
+    """Get credentials as plain text for an agent prompt.
 
     Args:
-        sites: List of site names from task config
+        agent_name: Agent name (e.g., "alice")
+        allowed_sites: Sites to include (e.g., ["gitea.zoo", "snappymail.zoo"])
 
     Returns:
-        Login instruction string or empty string
+        Human-readable credential string for agent prompts
     """
-    hints = []
-    for site in sites:
-        cred = get_credential_for_site(site)
-        if cred:
-            hints.append(f"Login with username '{cred.username}' and password '{cred.password}'")
+    lines = []
+    for site in allowed_sites:
+        try:
+            cred = get_credential(site, agent_name)
+            lines.append(f"- {site}: username '{cred.username}', password '{cred.password}'")
+        except KeyError:
+            continue
 
-    if hints:
-        return ". ".join(hints) + ". "
+    if lines:
+        return "Your login credentials:\n" + "\n".join(lines)
     return ""

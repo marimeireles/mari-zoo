@@ -1,0 +1,486 @@
+tasks:
+# ==========================================================
+# HOME.ZOO (Static - no DB)
+# # ==========================================================
+- id: test_home_landing
+  sites: []
+  intent: "Verify home.zoo landing page loads"
+  start_url: "https://home.zoo"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: false
+      autonomy_levels:
+        L0: "Look at the page and tell me the main heading text"
+  eval:
+    types: [string_match]
+    answers:
+      must_include: [zoo]
+
+# # ==========================================================
+# # AUTH.ZOO (PostgreSQL: auth_db)
+# # ==========================================================
+- id: test_auth_login_page
+  sites: [auth.zoo]
+  intent: "Verify auth.zoo login page displays"
+  start_url: "https://auth.zoo"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: false
+      autonomy_levels:
+        L0: "Look at the login page and tell me the labels of the input fields you see"
+  eval:
+    types: [string_match]
+    answers:
+      must_include: [login]
+
+- id: test_auth_login
+  sites: [auth.zoo]
+  intent: "Log into auth.zoo"
+  start_url: "https://auth.zoo"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: false
+      autonomy_levels:
+        L0: "Log in with your credentials. Tell me the username shown on the dashboard."
+  eval:
+    types: [string_match]
+    answers:
+      must_include: [alice]
+
+# ==========================================================
+# GITEA.ZOO (PostgreSQL: gitea_db)
+# ==========================================================
+- id: test_gitea_login
+  sites: [gitea.zoo]
+  intent: "Log into gitea"
+  start_url: "https://gitea.zoo/user/login"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: false
+      autonomy_levels:
+        L0: "Log in with your credentials. Tell me your username shown in the top right."
+  eval:
+    types: [string_match]
+    answers:
+      must_include: [alice]
+
+- id: test_gitea_view_repos
+  sites: [gitea.zoo]
+  intent: "View repository list"
+  start_url: "https://gitea.zoo"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "List your repositories and tell me their names"
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: [hello-zoo, express-mirror]
+
+- id: test_gitea_view_file
+  sites: [gitea.zoo]
+  intent: "View a file in a repository"
+  start_url: "https://gitea.zoo"
+  complexity: atomic
+  environment: domesticated
+  scene: gitea_with_file
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "Go to alice/test-repo and view README.md. Tell me what it says."
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: [test repository, API testing]
+
+- id: test_gitea_create_issue
+  sites: [gitea.zoo]
+  intent: "Create an issue"
+  start_url: "https://gitea.zoo"
+  complexity: atomic
+  environment: domesticated
+  require_reset: true
+  scene: gitea_with_repo
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "Create a new issue in alice/test-repo titled 'Bug Report' with body 'Found a bug'. Tell me the issue number after creating it."
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: ["#1", "issue 1", Bug Report]
+
+- id: test_gitea_view_issue
+  sites: [gitea.zoo]
+  intent: "View an existing issue"
+  start_url: "https://gitea.zoo"
+  complexity: atomic
+  environment: domesticated
+  scene: gitea_with_issue
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "Go to alice/test-repo and view issue #1. Tell me the title."
+  eval:
+    types: [string_match]
+    answers:
+      must_include: [Test Issue]
+
+- id: test_gitea_comment_issue
+  sites: [gitea.zoo]
+  intent: "Comment on an issue"
+  start_url: "https://gitea.zoo"
+  complexity: atomic
+  environment: domesticated
+  require_reset: true
+  scene: gitea_with_issue
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "Add a comment 'Working on this!' to issue #1 in alice/test-repo. After posting, tell me the text of your comment as it appears on the page."
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: [Working on this, comment added, comment posted, successfully]
+
+# ==========================================================
+# SNAPPYMAIL.ZOO (Stalwart mail server)
+# ==========================================================
+- id: test_email_login
+  sites: [snappymail.zoo]
+  intent: "Log into webmail"
+  start_url: "https://snappymail.zoo"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: false
+      autonomy_levels:
+        L0: "Log in with your credentials. After logging in, tell me the names of the mail folders you see in the sidebar."
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: [Sent, Drafts, Spam, Trash]
+
+- id: test_email_compose
+  sites: [snappymail.zoo]
+  intent: "Compose and send an email"
+  start_url: "https://snappymail.zoo"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "Compose an email to bob@snappymail.zoo with subject 'Test' and body 'Hello Bob'. Send it and tell me what message appears after sending."
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: [sent, success]
+
+- id: test_email_read
+  sites: [snappymail.zoo]
+  intent: "Read an email"
+  start_url: "https://snappymail.zoo"
+  complexity: atomic
+  environment: domesticated
+  scene: email_in_inbox
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "Check your inbox. Tell me the subject of the first email you see."
+  eval:
+    types: [string_match]
+    answers:
+      must_include: [Welcome to the team]
+
+- id: test_email_reply
+  sites: [snappymail.zoo]
+  intent: "Send an email"
+  start_url: "https://snappymail.zoo"
+  complexity: atomic
+  environment: domesticated
+  require_reset: true
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "Compose and send a new email to bob@snappymail.zoo with subject 'Hello Bob' and body 'How are you?'. Tell me what folder the email appears in after sending."
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: [Sent, Outbox]
+
+# ==========================================================
+# FOCALBOARD.ZOO (PostgreSQL: focalboard_db)
+# ==========================================================
+- id: test_focalboard_login
+  sites: [focalboard.zoo]
+  intent: "Log into focalboard"
+  start_url: "https://focalboard.zoo"
+  complexity: atomic
+  environment: domesticated
+  scene: focalboard_with_board
+  agents:
+    alice:
+      require_login: false
+      autonomy_levels:
+        L0: "Log in with your credentials. Tell me the exact name of the board you see in the sidebar."
+  eval:
+    types: [string_match]
+    answers:
+      must_include: [Project Board]
+
+- id: test_focalboard_view_board
+  sites: [focalboard.zoo]
+  intent: "View a kanban board"
+  start_url: "https://focalboard.zoo"
+  complexity: atomic
+  environment: domesticated
+  scene: focalboard_with_board
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "Open the 'Project Board'. Tell me the name of the board."
+  eval:
+    types: [string_match]
+    answers:
+      must_include: [Project Board]
+
+- id: test_focalboard_create_card
+  sites: [focalboard.zoo]
+  intent: "Create a new card"
+  start_url: "https://focalboard.zoo"
+  complexity: atomic
+  environment: domesticated
+  require_reset: true
+  scene: focalboard_with_board
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "Open 'Project Board' and create a new card titled 'New Feature'. Tell me the card title as it appears on the board."
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: [New Feature, created, added]
+
+# ==========================================================
+# POSTMILL.ZOO (PostgreSQL: postmill_db)
+# ==========================================================
+- id: test_postmill_login
+  sites: [postmill.zoo]
+  intent: "Log into postmill"
+  start_url: "https://postmill.zoo/login"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: false
+      autonomy_levels:
+        L0: "Log in with your credentials. Tell me your username after logging in."
+  eval:
+    types: [string_match]
+    answers:
+      must_include: [alice]
+
+- id: test_postmill_view_forum
+  sites: [postmill.zoo]
+  intent: "Find the most upvoted post in a forum"
+  start_url: "https://postmill.zoo"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "Go to the 'MachineLearning' forum and tell me the title of the most upvoted post"
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: [command-line tool, explains your errors, ChatGPT]
+
+- id: test_postmill_view_submission
+  sites: [postmill.zoo]
+  intent: "View a submission/post"
+  start_url: "https://postmill.zoo"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "Go to the MachineLearning forum and open the post about 'Nvidia RTX 4090'. Tell me who submitted it."
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: [MarvelsGrantMan136, Marvels]
+
+- id: test_postmill_comment
+  sites: [postmill.zoo]
+  intent: "Comment on a post"
+  start_url: "https://postmill.zoo"
+  complexity: atomic
+  environment: domesticated
+  require_reset: true
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "Go to the MachineLearning forum, open the 'Nvidia RTX 4090' post, and add a comment saying 'Great GPU for ML!'. Tell me the text of your comment as it appears on the page."
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: [Great GPU, comment added, comment posted, successfully, ML]
+
+- id: test_postmill_create_submission
+  sites: [postmill.zoo]
+  intent: "Create a new post"
+  start_url: "https://postmill.zoo"
+  complexity: atomic
+  environment: domesticated
+  require_reset: true
+  agents:
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "Create a new post in the 'MachineLearning' forum titled 'My ML Project' with body 'Just started learning neural networks!'. Tell me the title of your post as it appears on the forum."
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: [My ML Project, posted, created, submitted]
+
+# ==========================================================
+# WIKI.ZOO (Read-only - zim files)
+# ==========================================================
+- id: test_wiki_home
+  sites: [wiki.zoo]
+  intent: "View wiki homepage"
+  start_url: "https://wiki.zoo"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: false
+      autonomy_levels:
+        L0: "View the wiki homepage. Tell me the text shown in the search box placeholder."
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: [Wikipedia in simple English, simple English]
+
+- id: test_wiki_search
+  sites: [wiki.zoo]
+  intent: "Search for an article"
+  start_url: "https://wiki.zoo"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: false
+      autonomy_levels:
+        L0: "Search for 'Python programming' and tell me about the first result"
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: [Python, programming, language]
+
+# ==========================================================
+# ONESTOPSHOP.ZOO (MySQL: onestopshop_db)
+# ==========================================================
+- id: test_shop_homepage
+  sites: [onestopshop.zoo]
+  intent: "View shop homepage"
+  start_url: "https://onestopshop.zoo"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: false
+      autonomy_levels:
+        L0: "View the shop homepage and tell me what products you see"
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: [product, shop, price, $]
+
+- id: test_shop_browse_category
+  sites: [onestopshop.zoo]
+  intent: "Browse a product category"
+  start_url: "https://onestopshop.zoo"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: false
+      autonomy_levels:
+        L0: "Browse any product category and list the products you find"
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: [product, item]
+
+- id: test_shop_view_product
+  sites: [onestopshop.zoo]
+  intent: "View product details"
+  start_url: "https://onestopshop.zoo"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: false
+      autonomy_levels:
+        L0: "Click on any product and view its details. Tell me the product name and price."
+  eval:
+    types: [string_match]
+    answers:
+      must_include: [$]
+
+- id: test_shop_search
+  sites: [onestopshop.zoo]
+  intent: "Search for products"
+  start_url: "https://onestopshop.zoo"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: false
+      autonomy_levels:
+        L0: "Search for a product and tell me what you find"
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: [result, found, product]
+
+- id: test_shop_add_to_cart
+  sites: [onestopshop.zoo]
+  intent: "Add product to cart"
+  start_url: "https://onestopshop.zoo"
+  complexity: atomic
+  environment: domesticated
+  agents:
+    alice:
+      require_login: false
+      autonomy_levels:
+        L0: "Find any product and add it to your cart. Tell me the product name and how many items are in your cart."
+  eval:
+    types: [string_match]
+    answers:
+      must_include_any: ["1 item", "1 product", cart]

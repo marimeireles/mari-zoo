@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from .evaluators import EvalResult, evaluate_task
-from .models import AgentHarness, RunConfig, Task, TaskResult, Universe, load_universe
+from .evaluators import evaluate_task
+from .models import AgentHarness, RunConfig, Task, TaskResult, Universe
 from .zoo import Zoo
 
 if TYPE_CHECKING:
@@ -39,9 +37,9 @@ def create_agent_runner(
 
         return ClaudeSDKRunner(zoo, config, universe_path, universe)
     else:
-        from .multi_agent_runner import MultiAgentRunner
+        from .browser_use_runner import BrowserUseRunner
 
-        return MultiAgentRunner(zoo, config, universe_path, universe)
+        return BrowserUseRunner(zoo, config, universe_path, universe)
 
 
 @dataclass
@@ -50,12 +48,13 @@ class RunResult:
 
     task: Task
     task_result: TaskResult
-    eval_results: list[EvalResult] = field(default_factory=list)
+    universe: str = ""  # Universe name
+    task_file: str = ""  # Task file name (without extension)
 
     @property
-    def passed(self) -> bool:
-        """Task passes if all evaluations pass."""
-        return all(e.passed for e in self.eval_results)
+    def score(self) -> float:
+        """Task score (0.0-1.0) from subtask results."""
+        return self.task_result.score
 
 
 class TaskRunner:
@@ -84,34 +83,38 @@ class TaskRunner:
         pass
 
     async def run_and_evaluate_batch(
-        self, tasks: list[Task], universe_name: str = "unknown"
+        self, tasks: list[Task], universe_name: str = "unknown", task_file: str = ""
     ) -> list[RunResult]:
         """Run multiple tasks distributed across agents and evaluate results.
 
         Args:
             tasks: Tasks to run
             universe_name: Name of the universe (for human review file organization)
+            task_file: Name of the task file (without extension)
         """
         # Run all tasks
-        task_results = await self._agent_runner.run_multi_agent_tasks(tasks)
+        task_results = await self._agent_runner.run_tasks(tasks)
 
-        # Evaluate each result
+        # Evaluate each result (updates task_result.score and task_result.subtask_results)
         run_results = []
         for task_result in task_results:
             # Find the corresponding task
             task = next(t for t in tasks if t.task_id == task_result.task_id)
             # Get the evaluation for this specific autonomy level (falls back to default)
             evaluation = task.get_evaluation_for_level(task_result.autonomy_level)
-            # Pass task, universe_name, and judge_model to evaluators
-            eval_results = await evaluate_task(
+            # Evaluate task - this updates task_result.score and task_result.subtask_results
+            await evaluate_task(
                 task_result,
                 evaluation,
                 task=task,
                 universe_name=universe_name,
                 judge_model=self.config.judge_model,
             )
-            run_results.append(
-                RunResult(task=task, task_result=task_result, eval_results=eval_results)
-            )
+            run_results.append(RunResult(
+                task=task,
+                task_result=task_result,
+                universe=universe_name,
+                task_file=task_file,
+            ))
 
         return run_results

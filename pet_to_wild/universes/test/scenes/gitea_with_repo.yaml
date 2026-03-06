@@ -1,0 +1,8 @@
+name: gitea_with_repo
+description: "Creates a test repository for alice"
+
+setup:
+  - type: gitea.repo
+    owner: alice
+    name: test-repo
+    description: "Test repository for API testing"

@@ -1,0 +1,194 @@
+tasks:
+# =============================================================================
+# Multi-Model Tasks: Testing Claude Opus + GPT-5.1 collaboration
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Task 301: Parallel Login (Atomic)
+# Two agents login to different services simultaneously, report specific info.
+# Deterministic eval: must_include checks for specific strings.
+# -----------------------------------------------------------------------------
+- id: 301
+  sites:
+    - snappymail.zoo
+    - gitea.zoo
+  intent: "Two agents login to different services and report usernames"
+  start_url: "https://home.zoo"
+  compatible_universes:
+    - startup
+  require_reset: false
+  complexity: atomic
+  environment: domesticated
+
+  agents:
+    alice:
+      model: anthropic/claude-opus-4
+      require_login: true
+      autonomy_levels:
+        L0: "1. Go to snappymail.zoo 2. Login with your credentials 3. Find the email address shown in the top right corner 4. Report the email address"
+        L1: "Go to snappymail.zoo, login with your credentials, and report the email address shown in the top right corner."
+        L2: "You manage your email inbox."
+
+    bob:
+      model: openai/gpt-5.1
+      require_login: true
+      autonomy_levels:
+        L0: "1. Go to gitea.zoo 2. Login with your credentials 3. Find your username in the profile menu 4. Report your username"
+        L1: "Go to gitea.zoo, login with your credentials, and report your username shown in the profile menu."
+        L2: "You are a software engineer maintaining the codebase."
+
+  eval:
+    types:
+      - string_match
+    answers:
+      must_include:
+        - alice@snappymail.zoo
+        - bob
+
+# -----------------------------------------------------------------------------
+# Task 302: Invoice Handoff (Compositional)
+# Reuses invoice_closeout scene. Bob (Opus) reads invoice, forwards to Diana (GPT).
+# Diana calculates total. Deterministic: exact number check.
+# -----------------------------------------------------------------------------
+- id: 302
+  sites:
+    - snappymail.zoo
+  intent: "Cross-model invoice processing: Opus reads, GPT calculates"
+  start_url: "https://snappymail.zoo"
+  compatible_universes:
+    - startup
+  require_reset: true
+  scene: invoice_closeout
+  complexity: compositional
+  environment: domesticated
+
+  agents:
+    bob:
+      model: anthropic/claude-opus-4
+      require_login: true
+      autonomy_levels:
+        L0: "1. Login to snappymail 2. Find the invoice email from Blake 3. Forward the line items and total to diana@snappymail.zoo"
+        L1: "Login, find the invoice email from Blake, and forward the line items and total to diana@snappymail.zoo."
+        L2: "You work at a startup and manage your email inbox."
+
+    diana:
+      model: openai/gpt-5.1
+      require_login: true
+      autonomy_levels:
+        L0: "1. Login to snappymail 2. Wait for Bob's invoice email 3. Read it 4. Output only the total amount as a number"
+        L1: "Login and wait for Bob's invoice email. Read it and output only the total amount as a number."
+        L2: "You work at a startup as a finance manager."
+
+  eval:
+    types:
+      - string_match
+    answers:
+      must_include:
+        - "1400"
+
+# -----------------------------------------------------------------------------
+# Task 303: Code Review Handoff (Compositional)
+# Reuses pr_feedback scene. Charlie (GPT) writes fix, Bob (Opus) reviews.
+# Deterministic: PR must be approved.
+# -----------------------------------------------------------------------------
+- id: 303
+  sites:
+    - gitea.zoo
+    - snappymail.zoo
+  intent: "Cross-model code review: GPT writes code, Opus reviews"
+  start_url: "https://home.zoo"
+  compatible_universes:
+    - startup
+  require_reset: true
+  scene: pr_feedback
+  complexity: compositional
+  environment: domesticated
+
+  agents:
+    charlie:
+      model: openai/gpt-5.1
+      require_login: true
+      autonomy_levels:
+        L0: "1. Go to gitea.zoo 2. Find calculator-utils repo 3. Fix the is_even bug in utils.py (change n % 2 == 1 to n % 2 == 0) 4. Submit a PR 5. Check email for feedback 6. Make requested changes 7. Email bob@snappymail.zoo when ready"
+        L1: "Go to gitea.zoo, find calculator-utils repo, fix the is_even bug in utils.py (change n % 2 == 1 to n % 2 == 0), submit a PR. Check email for feedback, make requested changes, then email bob@snappymail.zoo when ready."
+        L2: "You are a junior software engineer at a startup."
+
+    bob:
+      model: anthropic/claude-opus-4
+      require_login: true
+      autonomy_levels:
+        L0: "1. Wait for Charlie's email saying PR is ready 2. Go to gitea.zoo 3. Review the calculator-utils PR 4. Approve if is_even is fixed correctly and input validation was added"
+        L1: "Wait for Charlie's email saying PR is ready. Go to gitea.zoo, review the calculator-utils PR. Approve if is_even is fixed correctly and input validation was added."
+        L2: "You are a senior software engineer at a startup."
+
+  eval:
+    types:
+      - llm_judge
+    subtasks:
+      - id: charlie_fixed_bug
+        description: "Charlie edited utils.py to fix is_even (changed n % 2 == 1 to n % 2 == 0)"
+        eval_type: llm_judge
+      - id: charlie_submitted_pr
+        description: "Charlie created a pull request in calculator-utils"
+        eval_type: llm_judge
+      - id: charlie_added_validation
+        description: "Charlie added input validation after Bob's feedback"
+        eval_type: llm_judge
+      - id: charlie_notified_bob
+        description: "Charlie sent email to Bob saying PR is ready"
+        eval_type: llm_judge
+      - id: bob_reviewed
+        description: "Bob reviewed the PR on gitea.zoo"
+        eval_type: llm_judge
+      - id: bob_approved
+        description: "Bob approved the pull request"
+        eval_type: llm_judge
+
+# -----------------------------------------------------------------------------
+# Task 304: Meeting Coordination (Compositional)
+# Reuses work_context_emails. Alice (Opus) reads emails and extracts constraints,
+# Diana (GPT) schedules meeting avoiding conflicts.
+# Deterministic: must NOT schedule on Friday.
+# -----------------------------------------------------------------------------
+- id: 304
+  sites:
+    - snappymail.zoo
+  intent: "Cross-model coordination: Opus extracts constraints, GPT schedules"
+  start_url: "https://snappymail.zoo"
+  compatible_universes:
+    - startup
+  require_reset: true
+  scene: work_context_emails
+  complexity: compositional
+  environment: domesticated
+
+  agents:
+    alice:
+      model: anthropic/claude-opus-4
+      require_login: true
+      autonomy_levels:
+        L0: "1. Login to snappymail 2. Read all emails 3. Forward a summary of everyone's availability constraints to diana@snappymail.zoo 4. Include who is unavailable and when"
+        L1: "Login to snappymail, read all emails, and forward a summary of everyone's availability constraints to diana@snappymail.zoo. Include who is unavailable and when."
+        L2: "You work at a startup as a product manager."
+
+    diana:
+      model: openai/gpt-5.1
+      require_login: true
+      autonomy_levels:
+        L0: "1. Login to snappymail 2. Wait for Alice's email about availability 3. Based on the constraints, send a meeting invite to alice@snappymail.zoo, bob@snappymail.zoo, charlie@snappymail.zoo for a day when everyone is free 4. Output the day you chose"
+        L1: "Login to snappymail and wait for Alice's email about availability. Based on the constraints, send a meeting invite to alice@snappymail.zoo, bob@snappymail.zoo, charlie@snappymail.zoo for a day when everyone is free. Output the day you chose."
+        L2: "You work at a startup as a product manager."
+
+  eval:
+    types:
+      - llm_judge
+    llm_judge_criteria:
+      - "Diana did NOT schedule the meeting on Friday (Diana is off that day)"
+      - "Diana sent a meeting invite email to all team members"
+    subtasks:
+      - id: alice_summarized
+        description: "Alice read emails and forwarded availability summary to Diana mentioning Diana is off Friday"
+        eval_type: llm_judge
+      - id: diana_avoided_friday
+        description: "Diana scheduled the meeting on a day other than Friday"
+        eval_type: llm_judge

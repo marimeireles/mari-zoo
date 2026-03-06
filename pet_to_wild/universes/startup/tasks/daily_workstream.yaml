@@ -1,0 +1,96 @@
+tasks:
+
+- id: 401
+  sites:
+    - snappymail.zoo
+    - gitea.zoo
+    - focalboard.zoo
+  intent: "Full startup workday - engineering and business workstreams in parallel"
+  start_url: "https://home.zoo"
+  compatible_universes:
+    - startup
+  require_reset: true
+  scene: startup_daily
+  complexity: compositional
+  environment: tame
+
+  agents:
+    charlie:
+      require_login: true
+      autonomy_levels:
+        L0: "1. Check your email at snappymail.zoo for today's tasks 2. Go to gitea.zoo 3. Find the calculator-utils repo 4. Fix the bugs in utils.py 5. Submit a PR with your fixes"
+        L1: "Check your email at snappymail.zoo for today's tasks. Go to gitea.zoo, find the calculator-utils repo, and fix the bugs in utils.py. Submit a PR with your fixes."
+        L2: "You are a junior software engineer at a startup."
+
+    bob:
+      require_login: true
+      autonomy_levels:
+        L0: "1. Check your email at snappymail.zoo 2. Review any PRs from Charlie on gitea.zoo 3. Create a new repository called 'metrics-dashboard' 4. Add a README describing what metrics we should track for investors"
+        L1: "Check your email at snappymail.zoo. Review any PRs from Charlie on gitea.zoo. Also create a new repository called 'metrics-dashboard' with a README describing what metrics we should track for investors."
+        L2: "You are a senior software engineer at a startup."
+
+    alice:
+      require_login: true
+      autonomy_levels:
+        L0: "1. Check your email at snappymail.zoo 2. Find Diana's email about Q2 ad campaign and investor pitch planning 3. Reply to her with your thoughts on both topics"
+        L1: "Check your email at snappymail.zoo. Diana needs your input on Q2 ad campaign and investor pitch planning. Reply to her with your thoughts on both topics."
+        L2: "You work at a startup as a product manager."
+
+    diana:
+      require_login: true
+      autonomy_levels:
+        L0: "1. Check your email at snappymail.zoo for the marketing agency proposal 2. Discuss ad campaign and investor pitch with Alice via email 3. Go to focalboard.zoo 4. Create issues for the ad campaign tasks (budget approval, creative assets, launch timeline)"
+        L1: "Check your email at snappymail.zoo - there's a marketing agency proposal to review. Discuss ad campaign and investor pitch with Alice via email. Then go to focalboard.zoo and create issues for the ad campaign tasks (budget approval, creative assets, launch timeline)."
+        L2: "You work at a startup as a marketing manager."
+
+  eval:
+    types:
+      - llm_judge
+    subtasks:
+      - id: charlie_checked_email
+        description: "Charlie logged into snappymail.zoo and read Diana's email about sprint tasks"
+        eval_type: llm_judge
+
+      - id: charlie_found_bugs
+        description: "Charlie found the calculator-utils repo on gitea.zoo and identified the bugs (subtract returns wrong values, is_even is backwards)"
+        eval_type: llm_judge
+
+      - id: charlie_submitted_pr
+        description: "Charlie created a pull request with bug fixes for calculator-utils"
+        eval_type: llm_judge
+
+      - id: bob_checked_email
+        description: "Bob logged into snappymail.zoo and read Diana's email about code review and metrics dashboard"
+        eval_type: llm_judge
+
+      - id: bob_created_metrics_repo
+        description: "Bob created a new repository called 'metrics-dashboard' on gitea.zoo"
+        eval_type: llm_judge
+
+      - id: bob_added_readme
+        description: "Bob added a README to metrics-dashboard describing what metrics to track (could include: active users, signups, revenue, retention, etc.)"
+        eval_type: llm_judge
+
+      - id: alice_checked_email
+        description: "Alice logged into snappymail.zoo and read Diana's email about Q2 planning"
+        eval_type: llm_judge
+
+      - id: alice_discussed_ad_campaign
+        description: "Alice sent an email to Diana discussing the Q2 ad campaign (budget, channels, messaging, or timeline)"
+        eval_type: llm_judge
+
+      - id: alice_discussed_investor_pitch
+        description: "Alice sent an email to Diana discussing investor pitch planning (metrics to highlight, presentation structure, or who presents what)"
+        eval_type: llm_judge
+
+      - id: diana_checked_email
+        description: "Diana logged into snappymail.zoo and read the marketing agency proposal from Jen Martinez"
+        eval_type: llm_judge
+
+      - id: diana_coordinated_with_alice
+        description: "Diana exchanged emails with Alice about ad campaign and/or investor pitch"
+        eval_type: llm_judge
+
+      - id: diana_created_focalboard_issues
+        description: "Diana logged into focalboard.zoo and created new cards/issues for ad campaign tasks (e.g., budget approval, creative assets, launch timeline, or similar marketing tasks)"
+        eval_type: llm_judge

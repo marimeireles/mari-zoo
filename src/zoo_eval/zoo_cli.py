@@ -1,25 +1,43 @@
 """
-Direct interface to The Zoo services.
+Direct API implementations for Zoo services.
 
-Uses REST APIs directly instead of shelling out to the CLI:
-- Gitea: https://gitea.zoo/api/v1/...
-- Focalboard: http://focalboard.zoo/api/v2/...
-- Email: docker compose exec (SMTP/IMAP require container access)
-
-All HTTP requests go through the Zoo proxy at localhost:3128.
+Uses httpx for HTTP APIs (Gitea, Focalboard) and smtplib/imaplib for email.
+No external dependencies on the_zoo CLI - everything runs natively in Python.
 """
+
+from __future__ import annotations
 
 import base64
 import os
-import re
 import subprocess
-import threading
 from contextlib import contextmanager
-from typing import Optional
+from typing import Any
 
-import requests
-
+from .helpers import ZOO_ADMIN_USER, ZOO_ADMIN_PASS
 from .zoo import _get_compose_project
+
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
+def _get_proxy_port() -> int:
+    """Get the Zoo proxy port from environment or default."""
+    return int(os.environ.get("ZOO_PROXY_PORT", "3128"))
+
+
+def _get_http_client():
+    """Get an httpx client configured for the Zoo proxy."""
+    import httpx
+
+    proxy_port = _get_proxy_port()
+    proxy_url = f"http://localhost:{proxy_port}"
+
+    return httpx.Client(
+        proxy=proxy_url,
+        verify=False,  # Zoo uses self-signed certs
+        timeout=30.0,
+    )
 
 
 # =============================================================================
@@ -85,148 +103,171 @@ class SeedTracker:
 
 
 # =============================================================================
-# Configuration
+# Auth.zoo API (Direct HTTP)
 # =============================================================================
 
-def _get_proxy_url() -> str:
-    """Get the Zoo proxy URL."""
-    port = os.environ.get("ZOO_PROXY_PORT", "3128")
-    return f"http://localhost:{port}"
+AUTH_ZOO_API_KEY = "zoo-seed-api-key"
 
 
-# =============================================================================
-# HTTP Client
-# =============================================================================
-
-class ZooHTTP:
-    """HTTP client for Zoo services with proxy support."""
-
-    def __init__(self):
-        self.proxy_url = _get_proxy_url()
-        self.session = requests.Session()
-        self.session.proxies = {
-            "http": self.proxy_url,
-            "https": self.proxy_url,
+def _auth_request(
+    endpoint: str,
+    method: str = "GET",
+    body: dict | None = None,
+) -> Any:
+    """Make a request to Auth.zoo API."""
+    with _get_http_client() as client:
+        url = f"https://auth.zoo{endpoint}"
+        headers = {
+            "Content-Type": "application/json",
+            "X-API-Key": AUTH_ZOO_API_KEY,
         }
-        self.session.verify = False  # Zoo uses self-signed certs
 
-        # Suppress InsecureRequestWarning
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-    def request(
-        self,
-        method: str,
-        url: str,
-        auth: Optional[tuple[str, str]] = None,
-        token: Optional[str] = None,
-        json: Optional[dict] = None,
-        headers: Optional[dict] = None,
-    ) -> requests.Response:
-        """Make an HTTP request through the Zoo proxy."""
-        req_headers = headers or {}
-
-        if token:
-            req_headers["Authorization"] = f"Bearer {token}"
-
-        return self.session.request(
+        response = client.request(
             method=method,
             url=url,
-            auth=auth,
-            json=json,
-            headers=req_headers,
+            json=body,
+            headers=headers,
         )
 
+        if response.status_code >= 400:
+            if response.status_code == 409:
+                return {"already_exists": True}
+            raise RuntimeError(f"Auth.zoo API error {response.status_code}: {response.text}")
 
-# Singleton HTTP client with thread-safe initialization
-_http: Optional[ZooHTTP] = None
-_http_lock = threading.Lock()
-
-
-def _get_http() -> ZooHTTP:
-    global _http
-    if _http is None:
-        with _http_lock:
-            # Double-check after acquiring lock
-            if _http is None:
-                _http = ZooHTTP()
-    return _http
+        if response.text:
+            try:
+                return response.json()
+            except Exception:
+                return response.text
+        return {}
 
 
-# =============================================================================
-# Gitea API
-# =============================================================================
-
-GITEA_BASE = "https://gitea.zoo/api/v1"
-
-
-def gitea_list_users(username: str, password: str) -> list[dict]:
-    """
-    List all Gitea users (requires admin).
+def auth_create_user(
+    username: str,
+    email: str,
+    name: str,
+    password: str,
+) -> dict:
+    """Create a user in auth.zoo.
 
     Args:
-        username: Admin username
-        password: Admin password
+        username: User's username (for login)
+        email: User's email address
+        name: User's full name
+        password: User's password
 
     Returns:
-        List of user data
+        Dict with user info or already_exists flag
     """
-    http = _get_http()
-    resp = http.request("GET", f"{GITEA_BASE}/admin/users", auth=(username, password))
-    resp.raise_for_status()
-    return resp.json()
+    return _auth_request(
+        "/api/users",
+        method="POST",
+        body={
+            "username": username,
+            "email": email,
+            "name": name,
+            "password": password,
+        },
+    )
+
+
+def auth_list_users() -> list[dict]:
+    """List all users in auth.zoo.
+
+    Returns:
+        List of user dicts
+    """
+    response = _auth_request("/api/users")
+    return response if isinstance(response, list) else []
+
+
+# =============================================================================
+# Gitea API (Direct HTTP)
+# =============================================================================
+
+def _gitea_request(
+    endpoint: str,
+    method: str = "GET",
+    body: dict | None = None,
+    username: str | None = None,
+    password: str | None = None,
+) -> Any:
+    """Make an authenticated request to Gitea API."""
+    with _get_http_client() as client:
+        url = f"https://gitea.zoo{endpoint}"
+        auth = (username, password) if username and password else None
+
+        response = client.request(
+            method=method,
+            url=url,
+            json=body,
+            auth=auth,
+        )
+
+        if response.status_code >= 400:
+            # Don't fail on 409 Conflict (already exists)
+            if response.status_code == 409:
+                return {"already_exists": True}
+            raise RuntimeError(f"Gitea API error {response.status_code}: {response.text}")
+
+        if response.text:
+            try:
+                return response.json()
+            except Exception:
+                return response.text
+        return {}
+
+
+def gitea_list_users(username: str = ZOO_ADMIN_USER, password: str = ZOO_ADMIN_PASS) -> list[dict]:
+    """List all Gitea users (requires admin)."""
+    response = _gitea_request(
+        "/api/v1/admin/users",
+        username=username,
+        password=password,
+    )
+    return response if isinstance(response, list) else []
 
 
 def gitea_create_repo(
     username: str,
     password: str,
     name: str,
-    owner: Optional[str] = None,
+    owner: str | None = None,
     description: str = "",
     private: bool = False,
     auto_init: bool = True,
 ) -> dict:
-    """
-    Create a Gitea repository.
+    """Create a Gitea repository."""
+    actual_owner = owner or username
 
-    Args:
-        username: Authenticated user's username
-        password: Authenticated user's password
-        name: Repository name
-        owner: Owner (org name). If None, creates under authenticated user.
-        description: Repository description
-        private: Whether the repo is private
-        auto_init: Initialize with README
+    # Check if owner is an org
+    endpoint = "/api/v1/user/repos"
+    auth_user, auth_pass = username, password
 
-    Returns:
-        Created repository data
-    """
-    http = _get_http()
-    auth = (username, password)
+    try:
+        org_check = _gitea_request(
+            f"/api/v1/orgs/{actual_owner}",
+            username=ZOO_ADMIN_USER,
+            password=ZOO_ADMIN_PASS,
+        )
+        if org_check.get("id"):
+            endpoint = f"/api/v1/orgs/{actual_owner}/repos"
+            auth_user, auth_pass = ZOO_ADMIN_USER, ZOO_ADMIN_PASS
+    except Exception:
+        pass  # Not an org, use user endpoint
 
-    if owner:
-        # Check if owner is an org
-        org_resp = http.request("GET", f"{GITEA_BASE}/orgs/{owner}", auth=auth)
-        if org_resp.status_code == 200:
-            endpoint = f"{GITEA_BASE}/orgs/{owner}/repos"
-        else:
-            raise ValueError(f"Organization '{owner}' not found")
-    else:
-        endpoint = f"{GITEA_BASE}/user/repos"
-
-    resp = http.request(
-        "POST",
+    return _gitea_request(
         endpoint,
-        auth=auth,
-        json={
+        method="POST",
+        body={
             "name": name,
             "description": description,
             "private": private,
             "auto_init": auto_init,
         },
+        username=auth_user,
+        password=auth_pass,
     )
-    resp.raise_for_status()
-    return resp.json()
 
 
 def gitea_add_file(
@@ -239,37 +280,45 @@ def gitea_add_file(
     message: str = "",
     branch: str = "main",
 ) -> dict:
-    """
-    Add or update a file in a Gitea repository.
+    """Add or update a file in a Gitea repository."""
+    # Content must be base64 encoded
+    content_b64 = base64.b64encode(content.encode()).decode()
 
-    Args:
-        username: Authenticated user's username
-        password: Authenticated user's password
-        owner: Repository owner
-        repo: Repository name
-        path: File path in repo
-        content: File content (will be base64 encoded)
-        message: Commit message
-        branch: Target branch
+    endpoint = f"/api/v1/repos/{owner}/{repo}/contents/{path}"
+    body = {
+        "content": content_b64,
+        "message": message or f"Add {path}",
+        "branch": branch,
+    }
 
-    Returns:
-        API response with commit info
-    """
-    http = _get_http()
-    encoded_content = base64.b64encode(content.encode()).decode()
+    # Check if file already exists - if so, we need to include the SHA for update
+    try:
+        existing = _gitea_request(
+            endpoint,
+            method="GET",
+            username=username,
+            password=password,
+        )
+        if existing.get("sha"):
+            body["sha"] = existing["sha"]
+            body["message"] = message or f"Update {path}"
+            return _gitea_request(
+                endpoint,
+                method="PUT",
+                body=body,
+                username=username,
+                password=password,
+            )
+    except Exception:
+        pass  # File doesn't exist, proceed with POST
 
-    resp = http.request(
-        "POST",
-        f"{GITEA_BASE}/repos/{owner}/{repo}/contents/{path}",
-        auth=(username, password),
-        json={
-            "content": encoded_content,
-            "message": message or f"Add {path}",
-            "branch": branch,
-        },
+    return _gitea_request(
+        endpoint,
+        method="POST",
+        body=body,
+        username=username,
+        password=password,
     )
-    resp.raise_for_status()
-    return resp.json()
 
 
 def gitea_create_issue(
@@ -280,146 +329,152 @@ def gitea_create_issue(
     title: str,
     body: str = "",
 ) -> dict:
-    """
-    Create an issue in a Gitea repository.
-
-    Args:
-        username: Authenticated user's username
-        password: Authenticated user's password
-        owner: Repository owner
-        repo: Repository name
-        title: Issue title
-        body: Issue body
-
-    Returns:
-        Created issue data
-    """
-    http = _get_http()
-    resp = http.request(
-        "POST",
-        f"{GITEA_BASE}/repos/{owner}/{repo}/issues",
-        auth=(username, password),
-        json={"title": title, "body": body},
+    """Create an issue in a Gitea repository."""
+    return _gitea_request(
+        f"/api/v1/repos/{owner}/{repo}/issues",
+        method="POST",
+        body={
+            "title": title,
+            "body": body,
+        },
+        username=username,
+        password=password,
     )
-    resp.raise_for_status()
-    return resp.json()
+
+
+def gitea_list_issues(
+    username: str,
+    password: str,
+    owner: str,
+    repo: str,
+) -> list[dict]:
+    """List issues in a Gitea repository."""
+    response = _gitea_request(
+        f"/api/v1/repos/{owner}/{repo}/issues",
+        username=username,
+        password=password,
+    )
+    return response if isinstance(response, list) else []
+
+
+def gitea_create_comment(
+    username: str,
+    password: str,
+    owner: str,
+    repo: str,
+    issue_number: int,
+    body: str,
+) -> dict:
+    """Create a comment on a Gitea issue."""
+    return _gitea_request(
+        f"/api/v1/repos/{owner}/{repo}/issues/{issue_number}/comments",
+        method="POST",
+        body={"body": body},
+        username=username,
+        password=password,
+    )
 
 
 # =============================================================================
-# Focalboard (Kanban) API
+# Focalboard (Kanban) API (Direct HTTP)
 # =============================================================================
 
-FOCALBOARD_BASE = "http://focalboard.zoo/api/v2"
+def _focalboard_request(
+    endpoint: str,
+    method: str = "GET",
+    body: dict | None = None,
+    token: str | None = None,
+) -> Any:
+    """Make a request to Focalboard API."""
+    with _get_http_client() as client:
+        url = f"http://focalboard.zoo{endpoint}"
+        headers = {
+            "Content-Type": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        response = client.request(
+            method=method,
+            url=url,
+            json=body,
+            headers=headers,
+        )
+
+        if response.status_code >= 400:
+            raise RuntimeError(f"Focalboard API error {response.status_code}: {response.text}")
+
+        if response.text:
+            try:
+                return response.json()
+            except Exception:
+                return response.text
+        return {}
 
 
 def focalboard_login(username: str, password: str) -> str:
-    """
-    Login to Focalboard and get auth token.
-
-    Args:
-        username: Focalboard username
-        password: Focalboard password
-
-    Returns:
-        Auth token string
-    """
-    http = _get_http()
-    resp = http.request(
-        "POST",
-        f"{FOCALBOARD_BASE}/login",
-        json={"type": "normal", "username": username, "password": password},
-        headers={"X-Requested-With": "XMLHttpRequest"},
+    """Login to Focalboard and get auth token."""
+    response = _focalboard_request(
+        "/api/v2/login",
+        method="POST",
+        body={
+            "type": "normal",
+            "username": username,
+            "password": password,
+        },
     )
-    resp.raise_for_status()
-    data = resp.json()
 
-    if "token" not in data:
-        raise ValueError(f"Login failed: {data}")
+    if response.get("token"):
+        return response["token"]
 
-    return data["token"]
+    raise ValueError(f"Login failed: {response}")
 
 
 def focalboard_get_teams(token: str) -> list[dict]:
     """Get all teams."""
-    http = _get_http()
-    resp = http.request(
-        "GET",
-        f"{FOCALBOARD_BASE}/teams",
-        token=token,
-        headers={"X-Requested-With": "XMLHttpRequest"},
-    )
-    resp.raise_for_status()
-    return resp.json()
+    response = _focalboard_request("/api/v2/teams", token=token)
+    return response if isinstance(response, list) else []
 
 
-def focalboard_list_boards(token: str, team_id: Optional[str] = None) -> list[dict]:
-    """
-    List all boards.
+def _get_team_id(token: str, team_id: str | None = None) -> str | None:
+    """Get team ID, looking up from API if not provided."""
+    if team_id:
+        return team_id
+    teams = focalboard_get_teams(token)
+    return teams[0].get("id") if teams else None
 
-    Args:
-        token: Auth token from focalboard_login
-        team_id: Team ID (auto-detected if not provided)
 
-    Returns:
-        List of board data
-    """
-    http = _get_http()
-
+def focalboard_list_boards(token: str, team_id: str | None = None) -> list[dict]:
+    """List all boards."""
+    team_id = _get_team_id(token, team_id)
     if not team_id:
-        teams = focalboard_get_teams(token)
-        if not teams:
-            return []
-        team_id = teams[0]["id"]
+        return []
 
-    resp = http.request(
-        "GET",
-        f"{FOCALBOARD_BASE}/teams/{team_id}/boards",
-        token=token,
-        headers={"X-Requested-With": "XMLHttpRequest"},
-    )
-    resp.raise_for_status()
-    return resp.json()
+    response = _focalboard_request(f"/api/v2/teams/{team_id}/boards", token=token)
+    return response if isinstance(response, list) else []
 
 
 def focalboard_create_board(
     token: str,
     title: str,
-    team_id: Optional[str] = None,
+    team_id: str | None = None,
 ) -> dict:
-    """
-    Create a Focalboard board.
-
-    Args:
-        token: Auth token
-        title: Board title
-        team_id: Team ID (auto-detected if not provided)
-
-    Returns:
-        Created board data
-    """
-    http = _get_http()
-
+    """Create a Focalboard board."""
+    team_id = _get_team_id(token, team_id)
     if not team_id:
-        teams = focalboard_get_teams(token)
-        if not teams:
-            raise ValueError("No teams found")
-        team_id = teams[0]["id"]
+        raise ValueError("No team ID available")
 
-    resp = http.request(
-        "POST",
-        f"{FOCALBOARD_BASE}/boards",
-        token=token,
-        headers={"X-Requested-With": "XMLHttpRequest"},
-        json={
+    return _focalboard_request(
+        "/api/v2/boards",
+        method="POST",
+        body={
             "title": title,
             "teamId": team_id,
-            "type": "O",
-            "showDescription": True,
-            "isTemplate": False,
+            "type": "O",  # Open board
         },
+        token=token,
     )
-    resp.raise_for_status()
-    return resp.json()
 
 
 def focalboard_create_card(
@@ -428,71 +483,60 @@ def focalboard_create_card(
     title: str,
     description: str = "",
 ) -> dict:
-    """
-    Create a card on a Focalboard board.
+    """Create a card on a Focalboard board."""
+    import time
 
-    Args:
-        token: Auth token
-        board_id: Board ID
-        title: Card title
-        description: Card description
-
-    Returns:
-        Created card data
-    """
-    http = _get_http()
-    resp = http.request(
-        "POST",
-        f"{FOCALBOARD_BASE}/boards/{board_id}/cards",
-        token=token,
-        headers={"X-Requested-With": "XMLHttpRequest"},
-        json={
+    now_ms = int(time.time() * 1000)
+    return _focalboard_request(
+        "/api/v2/boards/" + board_id + "/blocks",
+        method="POST",
+        body=[{
+            "type": "card",
             "title": title,
-            "contentOrder": [],
-            "properties": {},
-        },
+            "boardId": board_id,
+            "createAt": now_ms,
+            "updateAt": now_ms,
+            "fields": {
+                "properties": {},
+                "contentOrder": [],
+            },
+        }],
+        token=token,
     )
-    resp.raise_for_status()
-    return resp.json()
 
 
 def focalboard_list_cards(token: str, board_id: str, limit: int = 100) -> list[dict]:
-    """
-    List cards on a board.
-
-    Args:
-        token: Auth token
-        board_id: Board ID
-        limit: Max cards to return
-
-    Returns:
-        List of card data
-    """
-    http = _get_http()
-    resp = http.request(
-        "GET",
-        f"{FOCALBOARD_BASE}/boards/{board_id}/cards?per_page={limit}",
+    """List cards on a board."""
+    response = _focalboard_request(
+        f"/api/v2/boards/{board_id}/blocks?type=card",
         token=token,
-        headers={"X-Requested-With": "XMLHttpRequest"},
     )
-    resp.raise_for_status()
-    return resp.json()
+    result = response if isinstance(response, list) else []
+    return result[:limit]
 
 
 # =============================================================================
-# Email (via docker compose exec - SMTP/IMAP require container access)
+# Email API (Direct SMTP/IMAP)
 # =============================================================================
 
-def _docker_compose_exec(
-    service: str,
-    command: list[str],
-    project: Optional[str] = None,
-    timeout: int = 30,
-) -> subprocess.CompletedProcess:
-    """Run a command inside a docker compose service."""
-    project = project or _get_compose_project()
-    cmd = ["docker", "compose", "-p", project, "exec", "-T", service] + command
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+def _build_swaks_args(
+    from_addr: str, to_addr: str, subject: str, body: str, password: str, html: bool = False
+) -> list[str]:
+    """Build swaks command arguments for sending email."""
+    args = [
+        "swaks",
+        "--to", to_addr,
+        "--from", from_addr,
+        "--server", "stalwart:587",
+        "--auth-user", from_addr,
+        "--auth-password", password,
+        "--header", f"Subject: {subject}",
+        "--tls",
+    ]
+    if html:
+        args.extend(["--add-header", "Content-Type: text/html"])
+    args.extend(["--body", body])
+    return args
 
 
 def send_email(
@@ -503,23 +547,22 @@ def send_email(
     password: str,
     html: bool = False,
 ) -> None:
-    """
-    Send an email via SMTP (using swaks inside stalwart container).
+    """Send an email via SMTP using docker exec + swaks.
 
-    Args:
-        from_addr: Sender email address
-        to_addr: Recipient email address
-        subject: Email subject
-        body: Email body text
-        password: Sender's password
-        html: Whether body is HTML
-
-    Raises:
-        RuntimeError: If email sending fails
+    Uses swaks inside the stalwart container for reliable delivery.
     """
-    result = send_email_with_result(from_addr, to_addr, subject, body, password, html)
+    project = _get_compose_project()
+    swaks_args = _build_swaks_args(from_addr, to_addr, subject, body, password, html)
+
+    result = subprocess.run(
+        ["docker", "compose", "-p", project, "exec", "-T", "stalwart"] + swaks_args,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
     if result.returncode != 0:
-        raise RuntimeError(f"Failed to send email: {result.stderr}")
+        raise RuntimeError(f"Failed to send email: {result.stderr or result.stdout}")
 
 
 def send_email_with_result(
@@ -532,263 +575,440 @@ def send_email_with_result(
     max_retries: int = 15,
     retry_delay: float = 3.0,
 ) -> subprocess.CompletedProcess:
-    """
-    Send an email and return full result (for debugging).
-
-    Args:
-        from_addr: Sender email address
-        to_addr: Recipient email address
-        subject: Email subject
-        body: Email body text
-        password: Sender's password
-        html: Whether body is HTML
-        max_retries: Number of retries if connection fails
-        retry_delay: Seconds to wait between retries
-
-    Returns:
-        CompletedProcess with returncode, stdout, stderr
-    """
+    """Send an email and return full result (for debugging)."""
     import time
 
-    swaks_args = [
-        "swaks",
-        "--to", to_addr,
-        "--from", from_addr,
-        "--server", "stalwart:587",
-        "--auth-user", from_addr,
-        "--auth-password", password,
-        "--header", f"Subject: {subject}",
-        "--tls",
-    ]
-
-    if html:
-        swaks_args.extend(["--add-header", "Content-Type: text/html"])
-
-    swaks_args.extend(["--body", body])
+    project = _get_compose_project()
+    swaks_args = _build_swaks_args(from_addr, to_addr, subject, body, password, html)
+    cmd = ["docker", "compose", "-p", project, "exec", "-T", "stalwart"] + swaks_args
 
     for attempt in range(max_retries):
-        result = _docker_compose_exec("stalwart", swaks_args)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if result.returncode == 0:
             return result
-        # Retry on connection refused (service still starting)
-        if "Connection refused" in (result.stderr or ""):
+        # Retry on connection errors
+        if "Connection refused" in (result.stderr or "") or "ECONNREFUSED" in (result.stderr or ""):
             if attempt < max_retries - 1:
                 time.sleep(retry_delay)
                 continue
-        # Other errors - don't retry
         break
 
     return result
 
 
-def check_inbox(user: str, password: str, folder: str = "INBOX") -> Optional[int]:
-    """
-    Check inbox message count.
+def check_inbox(user: str, password: str, folder: str = "INBOX") -> int | None:
+    """Check inbox message count using docker exec + curl."""
+    project = _get_compose_project()
 
-    Args:
-        user: Email address
-        password: Email password
-        folder: Mailbox folder (default: INBOX)
+    try:
+        cmd = [
+            "docker", "compose", "-p", project, "exec", "-T", "stalwart",
+            "curl", "-s", "-u", f"{user}:{password}",
+            f"imap://localhost/{folder}",
+            "--request", f"EXAMINE {folder}",
+        ]
 
-    Returns:
-        Number of messages in inbox, or None if check failed
-    """
-    curl_cmd = [
-        "curl", "-s",
-        "-u", f"{user}:{password}",
-        f"imap://localhost/{folder}",
-        "--request", f"EXAMINE {folder}",
-    ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
-    result = _docker_compose_exec("stalwart", curl_cmd)
-
-    if result.returncode == 0 and result.stdout:
-        match = re.search(r"\* (\d+) EXISTS", result.stdout)
-        if match:
-            return int(match.group(1))
+        if result.returncode == 0:
+            import re
+            match = re.search(r"\* (\d+) EXISTS", result.stdout)
+            if match:
+                return int(match.group(1))
+    except Exception:
+        pass
 
     return None
 
 
-def search_emails(
-    user: str,
-    password: str,
-    folder: str = "INBOX",
-    subject: Optional[str] = None,
-    from_addr: Optional[str] = None,
-    to_addr: Optional[str] = None,
-) -> list[int]:
+# =============================================================================
+# Postmill (Reddit-like) API (Direct HTTP)
+# =============================================================================
+
+class PostmillSession:
+    """Authenticated session for Postmill API calls.
+
+    Postmill uses session cookies and CSRF tokens for authentication.
+    This class manages the session state across multiple requests.
     """
-    Search for emails by criteria.
 
-    Args:
-        user: Email address
-        password: Email password
-        folder: Mailbox folder (default: INBOX)
-        subject: Subject to search for (partial match)
-        from_addr: From address to search for
-        to_addr: To address to search for
+    def __init__(self, username: str, password: str):
+        import httpx
 
-    Returns:
-        List of message UIDs matching the criteria
-    """
-    # Build IMAP SEARCH command
-    search_criteria = []
-    if subject:
-        search_criteria.append(f'SUBJECT "{subject}"')
-    if from_addr:
-        search_criteria.append(f'FROM "{from_addr}"')
-    if to_addr:
-        search_criteria.append(f'TO "{to_addr}"')
+        self.username = username
+        self.password = password
+        self._csrf_token: str | None = None
+        self._logged_in = False
 
-    if not search_criteria:
-        search_criteria.append("ALL")
+        proxy_port = _get_proxy_port()
+        proxy_url = f"http://localhost:{proxy_port}"
 
-    search_query = " ".join(search_criteria)
+        # Persistent client that maintains cookies across requests
+        self._client = httpx.Client(
+            proxy=proxy_url,
+            verify=False,
+            timeout=30.0,
+            follow_redirects=True,
+        )
 
-    # URL encode the folder name for spaces
-    encoded_folder = folder.replace(" ", "%20")
+    def _request(
+        self,
+        endpoint: str,
+        method: str = "GET",
+        data: dict | None = None,
+        json_body: dict | None = None,
+    ) -> Any:
+        """Make a request to Postmill."""
+        url = f"http://postmill.zoo{endpoint}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Zoo Seed Script)",
+        }
 
-    curl_cmd = [
-        "curl", "-s",
-        "-u", f"{user}:{password}",
-        f"imap://localhost/{encoded_folder}",
-        "--request", f"SEARCH {search_query}",
-    ]
+        if method == "POST" and self._csrf_token:
+            if data is None:
+                data = {}
+            data["_csrf_token"] = self._csrf_token
 
-    result = _docker_compose_exec("stalwart", curl_cmd)
+        response = self._client.request(
+            method=method,
+            url=url,
+            headers=headers,
+            data=data,
+            json=json_body,
+        )
 
-    if result.returncode == 0 and result.stdout:
-        # Parse SEARCH response: "* SEARCH 1 2 3"
-        match = re.search(r"\* SEARCH\s*([\d\s]*)", result.stdout)
+        return response
+
+    def close(self):
+        """Close the HTTP client."""
+        self._client.close()
+
+    def _extract_csrf_token(self, html: str) -> str | None:
+        """Extract CSRF token from HTML page."""
+        import re
+        # Look for hidden input with name="_csrf_token" or "_token"
+        match = re.search(r'name=["\']_csrf_token["\'][^>]*value=["\']([^"\']+)["\']', html)
         if match:
-            uids_str = match.group(1).strip()
-            if uids_str:
-                return [int(uid) for uid in uids_str.split()]
+            return match.group(1)
+        match = re.search(r'value=["\']([^"\']+)["\'][^>]*name=["\']_csrf_token["\']', html)
+        if match:
+            return match.group(1)
+        match = re.search(r'name=["\']_token["\'][^>]*value=["\']([^"\']+)["\']', html)
+        if match:
+            return match.group(1)
+        return None
 
-    return []
+    def login(self) -> bool:
+        """Login to Postmill and establish session."""
+        # Get login page to extract CSRF token
+        response = self._request("/login")
+        if response.status_code != 200:
+            raise RuntimeError(f"Failed to get login page: {response.status_code}")
+
+        self._csrf_token = self._extract_csrf_token(response.text)
+        if not self._csrf_token:
+            raise RuntimeError("Could not find CSRF token on login page")
+
+        # Submit login form to /login_check endpoint
+        response = self._request(
+            "/login_check",
+            method="POST",
+            data={
+                "_username": self.username,
+                "_password": self.password,
+                "_remember_me": "on",
+            },
+        )
+
+        # Check if login succeeded (should redirect to home or show username)
+        self._logged_in = self.username.lower() in response.text.lower()
+        return self._logged_in
+
+    def get_submissions(self, forum: str = "all", sort: str = "new", limit: int = 25) -> list[dict]:
+        """Get list of submissions from a forum."""
+        response = self._request(f"/f/{forum}/{sort}")
+        if response.status_code != 200:
+            return []
+
+        # Parse submission IDs and titles from HTML
+        import re
+        submissions = []
+        # Look for submission links: /f/{forum}/{id}/-/{slug}
+        pattern = r'href=["\']/f/([^/]+)/(\d+)/-/([^"\']+)["\'][^>]*>([^<]+)</a>'
+        matches = re.findall(pattern, response.text)
+        for forum_name, sub_id, slug, title in matches[:limit]:
+            submissions.append({
+                "id": int(sub_id),
+                "forum": forum_name,
+                "slug": slug,
+                "title": title.strip(),
+            })
+        return submissions
+
+    def get_submission(self, submission_id: int) -> dict | None:
+        """Get a single submission by ID."""
+        # We need to find the submission URL first
+        submissions = self.get_submissions(limit=50)
+        for sub in submissions:
+            if sub["id"] == submission_id:
+                response = self._request(f"/f/{sub['forum']}/{sub['id']}/-/{sub['slug']}")
+                if response.status_code == 200:
+                    sub["html"] = response.text
+                    # Extract CSRF token for commenting
+                    self._csrf_token = self._extract_csrf_token(response.text)
+                return sub
+        return None
+
+    def create_comment(
+        self,
+        submission_id: int,
+        body: str,
+        parent_id: int | None = None,
+    ) -> dict:
+        """Create a comment on a submission."""
+        if not self._logged_in:
+            self.login()
+
+        # Get the submission page to get CSRF token and form action
+        submission = self.get_submission(submission_id)
+        if not submission:
+            raise RuntimeError(f"Submission {submission_id} not found")
+
+        # Post comment
+        endpoint = f"/f/{submission['forum']}/{submission_id}/-/{submission['slug']}/comment"
+        data = {
+            "comment[body]": body,
+        }
+        if parent_id:
+            data["comment[parent]"] = str(parent_id)
+
+        response = self._request(endpoint, method="POST", data=data)
+
+        if response.status_code >= 400:
+            raise RuntimeError(f"Failed to create comment: {response.status_code}")
+
+        return {"success": True, "submission_id": submission_id}
+
+    def create_forum(
+        self,
+        name: str,
+        title: str,
+        description: str = "",
+        sidebar: str = "",
+    ) -> dict:
+        """Create a new forum.
+
+        Args:
+            name: Forum URL name (lowercase, no spaces)
+            title: Display title for the forum
+            description: Short description
+            sidebar: Sidebar content (markdown)
+
+        Returns:
+            Dict with success status and forum name
+        """
+        if not self._logged_in:
+            self.login()
+
+        # Get the create forum page to get CSRF token
+        response = self._request("/create_forum")
+        if response.status_code != 200:
+            raise RuntimeError(f"Failed to get create forum page: {response.status_code}")
+
+        self._csrf_token = self._extract_csrf_token(response.text)
+        if not self._csrf_token:
+            raise RuntimeError("Could not find CSRF token on create forum page")
+
+        # Submit the form
+        data = {
+            "create_forum[name]": name,
+            "create_forum[title]": title,
+            "create_forum[description]": description,
+            "create_forum[sidebar]": sidebar,
+        }
+
+        response = self._request("/create_forum", method="POST", data=data)
+
+        # Check if forum was created (redirect to forum page or shows forum)
+        if response.status_code >= 400:
+            raise RuntimeError(f"Failed to create forum: {response.status_code}")
+
+        # Check if we got redirected to the new forum
+        if f"/f/{name}" in str(response.url) or name.lower() in response.text.lower():
+            return {"success": True, "name": name, "title": title}
+
+        # Check for error messages
+        if "already" in response.text.lower() or "exists" in response.text.lower():
+            return {"success": True, "name": name, "already_exists": True}
+
+        return {"success": True, "name": name}
+
+    def create_submission(
+        self,
+        forum: str,
+        title: str,
+        body: str = "",
+        url: str = "",
+    ) -> dict:
+        """Create a new submission/post in a forum.
+
+        Args:
+            forum: Forum name to post in
+            title: Submission title
+            body: Text body (for text submissions)
+            url: URL (for link submissions) - if provided, body is ignored
+
+        Returns:
+            Dict with success status and submission info
+        """
+        if not self._logged_in:
+            self.login()
+
+        # Determine submission type
+        is_link = bool(url)
+        submit_type = "link" if is_link else "text"
+
+        # Get the submit page to get CSRF token
+        submit_url = f"/f/{forum}/submit/{submit_type}"
+        response = self._request(submit_url)
+        if response.status_code != 200:
+            # Try alternate URL format
+            submit_url = f"/submit/{submit_type}?forum={forum}"
+            response = self._request(submit_url)
+            if response.status_code != 200:
+                raise RuntimeError(f"Failed to get submit page: {response.status_code}")
+
+        self._csrf_token = self._extract_csrf_token(response.text)
+        if not self._csrf_token:
+            raise RuntimeError("Could not find CSRF token on submit page")
+
+        # Submit the form
+        if is_link:
+            data = {
+                "submission[title]": title,
+                "submission[url]": url,
+                "submission[forum]": forum,
+            }
+        else:
+            data = {
+                "submission[title]": title,
+                "submission[body]": body,
+                "submission[forum]": forum,
+            }
+
+        response = self._request(submit_url, method="POST", data=data)
+
+        if response.status_code >= 400:
+            raise RuntimeError(f"Failed to create submission: {response.status_code}")
+
+        # Try to extract submission ID from redirect URL
+        import re
+        match = re.search(r'/f/[^/]+/(\d+)/', str(response.url))
+        submission_id = int(match.group(1)) if match else None
+
+        return {
+            "success": True,
+            "forum": forum,
+            "title": title,
+            "id": submission_id,
+        }
 
 
-def get_email_headers(
-    user: str,
-    password: str,
-    uid: int,
-    folder: str = "INBOX",
-) -> dict[str, str]:
-    """
-    Get email headers for a specific message.
+def postmill_login(username: str, password: str) -> PostmillSession:
+    """Login to Postmill and return authenticated session.
 
     Args:
-        user: Email address
-        password: Email password
-        uid: Message UID
-        folder: Mailbox folder
+        username: Postmill username
+        password: Postmill password
 
     Returns:
-        Dict of header name -> value
+        PostmillSession object for making authenticated requests
     """
-    encoded_folder = folder.replace(" ", "%20")
-
-    curl_cmd = [
-        "curl", "-s",
-        "-u", f"{user}:{password}",
-        f"imap://localhost/{encoded_folder};UID={uid};SECTION=HEADER",
-    ]
-
-    result = _docker_compose_exec("stalwart", curl_cmd)
-
-    headers = {}
-    if result.returncode == 0 and result.stdout:
-        # Parse headers (simple line-by-line)
-        current_header = None
-        current_value = []
-
-        for line in result.stdout.split("\n"):
-            if line.startswith(" ") or line.startswith("\t"):
-                # Continuation of previous header
-                if current_header:
-                    current_value.append(line.strip())
-            elif ":" in line:
-                # Save previous header
-                if current_header:
-                    headers[current_header] = " ".join(current_value)
-                # Start new header
-                parts = line.split(":", 1)
-                current_header = parts[0].strip()
-                current_value = [parts[1].strip()] if len(parts) > 1 else []
-            else:
-                # End of headers
-                if current_header:
-                    headers[current_header] = " ".join(current_value)
-                break
-
-    return headers
+    session = PostmillSession(username, password)
+    if not session.login():
+        raise RuntimeError(f"Failed to login to Postmill as {username}")
+    return session
 
 
-def get_email_body(
-    user: str,
-    password: str,
-    uid: int,
-    folder: str = "INBOX",
-) -> str:
-    """
-    Get email body text for a specific message.
+def postmill_list_submissions(
+    session: PostmillSession,
+    forum: str = "all",
+    sort: str = "new",
+    limit: int = 25,
+) -> list[dict]:
+    """List submissions from a Postmill forum.
 
     Args:
-        user: Email address
-        password: Email password
-        uid: Message UID
-        folder: Mailbox folder
+        session: Authenticated PostmillSession
+        forum: Forum name (default "all" for all forums)
+        sort: Sort order ("new", "hot", "top", etc.)
+        limit: Maximum number of submissions to return
 
     Returns:
-        Email body text (plain text portion)
+        List of submission dicts with id, forum, slug, title
     """
-    encoded_folder = folder.replace(" ", "%20")
-
-    # Fetch the full message (TEXT section)
-    curl_cmd = [
-        "curl", "-s",
-        "-u", f"{user}:{password}",
-        f"imap://localhost/{encoded_folder};UID={uid};SECTION=TEXT",
-    ]
-
-    result = _docker_compose_exec("stalwart", curl_cmd)
-
-    if result.returncode == 0 and result.stdout:
-        body = result.stdout
-        # Try to decode quoted-printable if present
-        if "=\n" in body or "=20" in body:
-            import quopri
-            try:
-                body = quopri.decodestring(body.encode()).decode("utf-8", errors="replace")
-            except Exception:
-                pass
-        return body.strip()
-
-    return ""
+    return session.get_submissions(forum=forum, sort=sort, limit=limit)
 
 
-def email_exists_in_folder(
-    user: str,
-    password: str,
-    folder: str,
-    subject: Optional[str] = None,
-    from_addr: Optional[str] = None,
-    to_addr: Optional[str] = None,
-) -> bool:
-    """
-    Check if an email matching criteria exists in a folder.
+def postmill_create_comment(
+    session: PostmillSession,
+    submission_id: int,
+    body: str,
+    parent_id: int | None = None,
+) -> dict:
+    """Create a comment on a Postmill submission.
 
     Args:
-        user: Email address
-        password: Email password
-        folder: Mailbox folder to check
-        subject: Subject to search for (partial match)
-        from_addr: From address to search for
-        to_addr: To address to search for
+        session: Authenticated PostmillSession
+        submission_id: ID of the submission to comment on
+        body: Comment text (supports markdown)
+        parent_id: Optional parent comment ID for replies
 
     Returns:
-        True if matching email found, False otherwise
+        Dict with success status
     """
-    uids = search_emails(user, password, folder, subject, from_addr, to_addr)
-    return len(uids) > 0
+    return session.create_comment(submission_id, body, parent_id)
+
+
+def postmill_create_forum(
+    session: PostmillSession,
+    name: str,
+    title: str,
+    description: str = "",
+    sidebar: str = "",
+) -> dict:
+    """Create a new forum in Postmill.
+
+    Args:
+        session: Authenticated PostmillSession
+        name: Forum URL name (lowercase, no spaces, e.g., "testing")
+        title: Display title for the forum
+        description: Short description of the forum
+        sidebar: Sidebar content (supports markdown)
+
+    Returns:
+        Dict with success status and forum name
+    """
+    return session.create_forum(name, title, description, sidebar)
+
+
+def postmill_create_submission(
+    session: PostmillSession,
+    forum: str,
+    title: str,
+    body: str = "",
+    url: str = "",
+) -> dict:
+    """Create a new submission/post in a Postmill forum.
+
+    Args:
+        session: Authenticated PostmillSession
+        forum: Forum name to post in
+        title: Submission title
+        body: Text body (for text submissions)
+        url: URL (for link submissions) - if provided, creates a link post
+
+    Returns:
+        Dict with success status and submission info including ID if available
+    """
+    return session.create_submission(forum, title, body, url)

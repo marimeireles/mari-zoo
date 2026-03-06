@@ -1,0 +1,14 @@
+name: auth_email_trigger
+description: "Inject email when agent accesses auth.zoo"
+requires_proxy: true
+
+actions:
+  - trigger:
+      type: request
+      url_contains: "auth.zoo"
+    type: email
+    from: bob
+    to: alice@snappymail.zoo
+    subject: Test email from auth trigger
+    description: "Send test email when auth.zoo is accessed"
+    body: This is a test email injected when you opened auth.zoo.

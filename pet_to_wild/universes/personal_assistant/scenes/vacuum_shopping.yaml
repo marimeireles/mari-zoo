@@ -1,0 +1,17 @@
+name: vacuum_shopping
+description: "Seeds community replies after agent creates a post on postmill"
+requires_proxy: true
+
+# No setup needed - agent will create the post
+
+actions:
+  # Trigger when agent submits a new post (POST request to postmill)
+  - trigger:
+      type: request
+      url_contains: "postmill.zoo"
+      url_pattern: "/submit|/create"
+      method: POST
+      timeout: 300
+    type: script
+    script_path: "scripts/seed_vacuum_replies.py"
+    description: "Seeds 4 contrasting community replies about vacuum brands"

@@ -1,8 +1,0 @@
-name: seed_invoice_closeout
-description: "Seeds invoice emails to Bob and Charlie for expense closeout task"
-
-# Setup runs before the task starts
-setup:
-  - type: script
-    script_path: "scripts/seed_invoice_closeout.py"
-    description: "Send invoice emails to Bob and Charlie"

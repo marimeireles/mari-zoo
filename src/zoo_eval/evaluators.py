@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-from .models import Evaluation, EvalType, TaskResult
+from .models import Evaluation, EvalType, Subtask, SubtaskResult, TaskResult
 
 
 @dataclass
@@ -16,6 +17,40 @@ class EvalResult:
     passed: bool
     eval_type: EvalType
     details: str = ""
+
+
+def _check_must_include(answer: str, required_values: list[str]) -> tuple[list[str], list[str]]:
+    """Check which required values are present in the answer.
+
+    Args:
+        answer: The answer string to check (should already be lowercased)
+        required_values: List of values that must be present
+
+    Returns:
+        Tuple of (matched values, missing values)
+    """
+    matched = [v for v in required_values if v.lower() in answer]
+    missing = [v for v in required_values if v.lower() not in answer]
+    return matched, missing
+
+
+def _format_match_result(
+    matched: list[str], missing: list[str], eval_type: EvalType
+) -> EvalResult:
+    """Format a must_include match result into an EvalResult."""
+    total = len(matched) + len(missing)
+    if not missing:
+        return EvalResult(
+            passed=True,
+            eval_type=eval_type,
+            details=f"Includes all {total} required values",
+        )
+    found = len(matched)
+    return EvalResult(
+        passed=False,
+        eval_type=eval_type,
+        details=f"Partial: {found}/{total} ({100*found//total}%). Found: {matched}. Missing: {missing}",
+    )
 
 
 class Evaluator(ABC):
@@ -66,21 +101,22 @@ class StringMatchEvaluator(Evaluator):
 
         # Must include all
         if ref.must_include:
-            matched = [s for s in ref.must_include if s.lower() in answer]
-            missing = [s for s in ref.must_include if s.lower() not in answer]
-            total = len(ref.must_include)
-            found = len(matched)
+            matched, missing = _check_must_include(answer, ref.must_include)
+            return _format_match_result(matched, missing, EvalType.STRING_MATCH)
 
-            if not missing:
+        # Must include any (at least one)
+        if ref.must_include_any:
+            matched = [v for v in ref.must_include_any if v.lower() in answer]
+            if matched:
                 return EvalResult(
                     passed=True,
                     eval_type=EvalType.STRING_MATCH,
-                    details=f"Includes all {total} required values",
+                    details=f"Found required value(s): {matched}",
                 )
             return EvalResult(
                 passed=False,
                 eval_type=EvalType.STRING_MATCH,
-                details=f"Partial: {found}/{total} ({100*found//total}%). Found: {matched}. Missing: {missing}",
+                details=f"None of required values found. Expected any of: {ref.must_include_any}",
             )
 
         return EvalResult(
@@ -225,22 +261,8 @@ class DBMatchEvaluator(Evaluator):
         answer = result.agent_answer.lower()
 
         if db_query.match_type == "must_include":
-            matched = [v for v in expected_values if v.lower() in answer]
-            missing = [v for v in expected_values if v.lower() not in answer]
-            total = len(expected_values)
-            found = len(matched)
-
-            if not missing:
-                return EvalResult(
-                    passed=True,
-                    eval_type=EvalType.DB_MATCH,
-                    details=f"Includes all {total} expected values",
-                )
-            return EvalResult(
-                passed=False,
-                eval_type=EvalType.DB_MATCH,
-                details=f"Partial: {found}/{total} ({100*found//total}%). Found: {matched}. Missing: {missing}",
-            )
+            matched, missing = _check_must_include(answer, expected_values)
+            return _format_match_result(matched, missing, EvalType.DB_MATCH)
 
         elif db_query.match_type == "exact_match":
             if len(expected_values) == 1 and expected_values[0].lower() in answer:
@@ -281,10 +303,10 @@ class LLMJudgeEvaluator(Evaluator):
 
     Auto-detects provider based on model name:
     - Models with "/" (e.g., "google/gemini-2.5-flash") → OpenRouter
-    - Models without "/" (e.g., "gpt-4o") → OpenAI direct
+    - Models without "/" (e.g., "gpt-5.1") → OpenAI direct
     """
 
-    def __init__(self, judge_model: str = "gpt-4o"):
+    def __init__(self, judge_model: str = "gpt-5.1"):
         """Initialize with judge model.
 
         Args:
@@ -309,29 +331,71 @@ class LLMJudgeEvaluator(Evaluator):
                 details="No agent answer to evaluate",
             )
 
+        # Extract agent steps from raw results (no screenshots, just step descriptions)
+        agent_steps_text = ""
+        for agent_result in result.agent_results:
+            if agent_result.raw_result and hasattr(agent_result.raw_result, "agent_steps"):
+                try:
+                    steps = agent_result.raw_result.agent_steps()
+                    if steps:
+                        agent_steps_text += f"\n[{agent_result.agent_name} actions]:\n"
+                        agent_steps_text += "\n".join(f"  {i+1}. {step}" for i, step in enumerate(steps))
+                        agent_steps_text += "\n"
+                except Exception:
+                    pass
+
         # Use auto-detected provider for judging
         try:
             client, model = create_openai_client(self.judge_model)
 
             # Build prompt with strict criteria-only evaluation
             criteria_text = "\n".join(f"{i+1}. {c}" for i, c in enumerate(evaluation.llm_judge_criteria))
-            prompt = f"""You are a strict evaluator checking if an agent's output meets specific criteria.
 
-IMPORTANT RULES:
-- ONLY check the numbered criteria below. Do NOT add extra requirements.
-- Do NOT infer what the original task was or judge anything beyond the criteria.
+            steps_section = f"""
+AGENT ACTIONS (step-by-step):
+{agent_steps_text if agent_steps_text else "No step details available"}
+""" if agent_steps_text else ""
+
+            prompt = f"""You are an evaluator checking if an agent's output meets specific criteria.
+
+IMPORTANT CONTEXT:
+- You see the agent's FINAL TEXT OUTPUT and STEP-BY-STEP ACTIONS below
+- The AI agent has tools to interact with web pages and have access to the DOM, meaning that some actions
+won't clearly translate to an usual human action.
+
+EVALUATION RULES:
+- Focus on outcome correctness, not prescriptive methods. Agent can use any approach to achieve results.
+- Judge whether the agent obtained CORRECT information, not HOW they obtained it. If the agent reports accurate data that existed on the page, they succeeded - even without clicking through every UI element.
+- ONLY check the numbered criteria below. Do NOT add extra requirements beyond criteria.
 
 CRITERIA TO CHECK:
 {criteria_text}
-
-AGENT'S OUTPUT:
+{steps_section}
+AGENT'S FINAL OUTPUT:
 {result.agent_answer}
 
 Check each numbered criterion. Respond with JSON:
 {{
+  "reasoning": "Brief status for each criterion",
   "passed": true/false,
-  "reasoning": "Brief status for each criterion"
 }}"""
+
+            # Debug: Print what the judge sees
+            print(f"\n{'='*80}")
+            print(f"🔍 LLM JUDGE DEBUG")
+            print(f"{'='*80}")
+            print(f"Judge Model: {self.judge_model}")
+            print(f"\nNumber of criteria: {len(evaluation.llm_judge_criteria)}")
+            print(f"Criteria: {evaluation.llm_judge_criteria}")
+            if agent_steps_text:
+                num_steps = agent_steps_text.count("\n")
+                print(f"\nAgent steps provided: ~{num_steps} lines")
+                print(f"Steps preview:\n{agent_steps_text[:500]}...")
+            else:
+                print(f"\nAgent steps: None available")
+            print(f"\nFinal output length: {len(result.agent_answer)} chars")
+            print(f"Final output preview: {result.agent_answer[:200]}...")
+            print(f"{'='*80}\n")
 
             response = client.chat.completions.create(
                 model=model,
@@ -341,11 +405,17 @@ Check each numbered criterion. Respond with JSON:
             )
 
             # Parse response
-            import json
-
             result_json = json.loads(response.choices[0].message.content)
             passed = result_json.get("passed", False)
             reasoning = result_json.get("reasoning", "No reasoning provided")
+
+            # Debug: Show judge's decision
+            print(f"\n{'='*80}")
+            print(f"📊 LLM JUDGE VERDICT")
+            print(f"{'='*80}")
+            print(f"Result: {'✅ PASS' if passed else '❌ FAIL'}")
+            print(f"\nReasoning:\n{reasoning}")
+            print(f"{'='*80}\n")
 
             return EvalResult(
                 passed=passed,
@@ -373,7 +443,6 @@ class HumanCriticEvaluator(Evaluator):
         """Generate review files for human to evaluate."""
         from datetime import datetime
         from pathlib import Path
-        import json
 
         # Create directory structure: human_reviews/{date}/{universe}/{task_id}/
         timestamp = datetime.now().strftime("%Y-%m-%d")
@@ -396,7 +465,7 @@ class HumanCriticEvaluator(Evaluator):
             output_info = {
                 "agent_answer": result.agent_answer,
                 "final_url": result.final_url,
-                "success": result.success,
+                "score": result.score,
                 "error": result.error,
                 "steps": result.steps,
                 "duration_seconds": result.duration_seconds,
@@ -564,7 +633,7 @@ def get_evaluator(
     eval_type: EvalType,
     task=None,
     universe_name: str = "unknown",
-    judge_model: str = "gpt-4o",
+    judge_model: str = "gpt-5.1",
 ) -> Evaluator:
     """Get the appropriate evaluator for an eval type.
 
@@ -574,20 +643,68 @@ def get_evaluator(
         universe_name: Universe name (for HUMAN_CRITIC file organization)
         judge_model: Model to use for LLM_JUDGE (auto-detects provider)
     """
-    if eval_type == EvalType.STRING_MATCH:
-        return StringMatchEvaluator()
-    elif eval_type == EvalType.DB_MATCH:
-        return DBMatchEvaluator()
-    elif eval_type == EvalType.LLM_JUDGE:
+    # Simple evaluators that need no config
+    simple_evaluators = {
+        EvalType.STRING_MATCH: StringMatchEvaluator,
+        EvalType.DB_MATCH: DBMatchEvaluator,
+        EvalType.CUSTOM_FUNCTION: CustomFunctionEvaluator,
+    }
+
+    if eval_type in simple_evaluators:
+        return simple_evaluators[eval_type]()
+
+    if eval_type == EvalType.LLM_JUDGE:
         return LLMJudgeEvaluator(judge_model=judge_model)
-    elif eval_type == EvalType.HUMAN_CRITIC:
+
+    if eval_type == EvalType.HUMAN_CRITIC:
         if task is None:
             raise ValueError("HumanCriticEvaluator requires task parameter")
         return HumanCriticEvaluator(task=task, universe_name=universe_name)
-    elif eval_type == EvalType.CUSTOM_FUNCTION:
+
+    if eval_type == EvalType.CUSTOM_FUNCTION:
         return CustomFunctionEvaluator(task=task)
+
+    raise ValueError(f"Unknown eval type: {eval_type}")
+
+
+def compute_score(subtask_results: list[SubtaskResult]) -> float:
+    """Compute task score from subtask results.
+
+    Score = sum(passed_subtask_weights) / sum(all_weights)
+    Returns 0.0 if no subtasks.
+    """
+    if not subtask_results:
+        return 0.0
+
+    total_weight = sum(s.weight for s in subtask_results)
+    if total_weight == 0:
+        return 0.0
+
+    passed_weight = sum(s.weight for s in subtask_results if s.passed)
+    return passed_weight / total_weight
+
+
+def _create_evaluation_for_subtask(subtask: Subtask, parent_eval: Evaluation) -> Evaluation:
+    """Create a temporary Evaluation for a single subtask.
+
+    For LLM subtasks, the subtask description becomes the criterion.
+    For other types, inherits from parent evaluation config.
+    """
+    if subtask.eval_type == EvalType.LLM_JUDGE:
+        return Evaluation(
+            eval_types=[EvalType.LLM_JUDGE],
+            llm_judge_criteria=[subtask.description],
+        )
     else:
-        raise ValueError(f"Unknown eval type: {eval_type}")
+        # For other eval types, use parent evaluation's config
+        return Evaluation(
+            eval_types=[subtask.eval_type],
+            reference_answers=parent_eval.reference_answers,
+            reference_url=parent_eval.reference_url,
+            program_html=parent_eval.program_html,
+            db_query=parent_eval.db_query,
+            custom_function=parent_eval.custom_function,
+        )
 
 
 async def evaluate_task(
@@ -595,25 +712,64 @@ async def evaluate_task(
     evaluation: Evaluation,
     task=None,
     universe_name: str = "unknown",
-    judge_model: str = "gpt-4o",
-) -> list[EvalResult]:
-    """Run all evaluators for a task and return results.
+    judge_model: str = "gpt-5.1",
+) -> list[SubtaskResult]:
+    """Evaluate a task and return subtask results.
+
+    If subtasks are defined, evaluates each using its eval_type.
+    If no subtasks, runs standard eval_types as implicit subtasks.
 
     Args:
         result: Task execution result
         evaluation: Evaluation criteria
         task: Task object (required for HUMAN_CRITIC evaluator)
         universe_name: Universe name (for file organization)
-        judge_model: Model to use for LLM_JUDGE (auto-detects provider)
+        judge_model: Model to use for LLM_JUDGE
+
+    Returns:
+        List of SubtaskResult (also updates result.subtask_results and result.score)
     """
-    results = []
+    subtask_results = []
 
-    # Run standard evaluators
-    for eval_type in evaluation.eval_types:
-        evaluator = get_evaluator(
-            eval_type, task=task, universe_name=universe_name, judge_model=judge_model
-        )
-        result_eval = await evaluator.evaluate(result, evaluation)
-        results.append(result_eval)
+    if evaluation.subtasks:
+        # Evaluate each subtask using the same evaluator pattern
+        for subtask in evaluation.subtasks:
+            # Create temporary evaluation with subtask's criteria
+            subtask_eval = _create_evaluation_for_subtask(subtask, evaluation)
 
-    return results
+            # Use same evaluator as tasks
+            evaluator = get_evaluator(
+                subtask.eval_type, task=task, universe_name=universe_name, judge_model=judge_model
+            )
+            eval_result = await evaluator.evaluate(result, subtask_eval)
+
+            subtask_results.append(SubtaskResult(
+                subtask_id=subtask.id,
+                description=subtask.description,
+                weight=subtask.weight,
+                passed=eval_result.passed,
+                evidence=eval_result.details,
+                eval_type=subtask.eval_type,
+            ))
+    else:
+        # No subtasks - run standard evaluators as implicit subtasks (weight=1 each)
+        for eval_type in evaluation.eval_types:
+            evaluator = get_evaluator(
+                eval_type, task=task, universe_name=universe_name, judge_model=judge_model
+            )
+            eval_result = await evaluator.evaluate(result, evaluation)
+
+            subtask_results.append(SubtaskResult(
+                subtask_id=eval_type.value,
+                description=f"{eval_type.value} evaluation",
+                weight=1,
+                passed=eval_result.passed,
+                evidence=eval_result.details,
+                eval_type=eval_type,
+            ))
+
+    # Compute score and update result
+    result.subtask_results = subtask_results
+    result.score = compute_score(subtask_results)
+
+    return subtask_results

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import gc
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -12,29 +12,14 @@ from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
     ResultMessage,
-    TextBlock,
-    ToolResultBlock,
     ToolUseBlock,
-    UserMessage,
     query,
 )
 
 from .base_agent_runner import BaseAgentRunner
-from .models import (
-    AgentResult,
-    CoordinationMode,
-    RunConfig,
-    Task,
-    TaskAgentConfig,
-    TaskResult,
-    Universe,
-)
+from .models import AgentResult, RunConfig, Task, TaskAgentConfig, TaskResult, Universe
 from .scenes import SceneManager
-from .turn_based_runner import TurnBasedOrchestrator
 from .zoo import Zoo
-
-# Delay between sequential agent runs to allow SDK async cleanup
-INTER_AGENT_DELAY_SECONDS = 5
 
 
 class ClaudeSDKRunner(BaseAgentRunner):
@@ -101,12 +86,13 @@ class ClaudeSDKRunner(BaseAgentRunner):
         messages_log: list[Any] = []
 
         try:
-            # Build the prompt using shared method
-            prompt = self._build_full_task(agent_config, task, start_url, autonomy_level)
+            # Build the prompt using shared methods
+            agent_context = self._build_agent_context(agent_config, task)
+            task_prompt = self._build_full_task(agent_config, task, start_url, autonomy_level)
+            prompt = f"{agent_context}\n\n{task_prompt}"
             prompt += (
                 "\n\nUse the browser tools to complete this task. "
-                "When done, use browser_snapshot to capture the final page state, "
-                "then provide your final answer."
+                "When done, provide your final answer."
             )
 
             # Configure the agent
@@ -115,63 +101,29 @@ class ClaudeSDKRunner(BaseAgentRunner):
                 allowed_tools=["mcp__zoo-playwright__*"],
                 model=self.config.claude_model,
                 max_turns=self.config.max_steps,
-                # Log SDK stderr for debugging
-                stderr=lambda msg: print(f"      [sdk] {msg}") if msg.strip() else None,
             )
 
             # Run the agent with proper timeout enforcement
             final_answer = None
             result_message: ResultMessage | None = None
-            last_text_block = None  # Fallback for answer if no ResultMessage
 
             try:
-                print(f"    Agent {agent_config.name}: Starting task...")
                 async with asyncio.timeout(self.config.timeout_seconds):
-                    # Create generator and ensure proper cleanup
-                    gen = query(prompt=prompt, options=options)
-                    try:
-                        last_tool_name = None
-                        async for message in gen:
-                            if isinstance(message, AssistantMessage):
-                                messages_log.append(message)
-                                for block in message.content:
-                                    if isinstance(block, TextBlock):
-                                        # Show agent's reasoning (truncated)
-                                        text = block.text[:200] + "..." if len(block.text) > 200 else block.text
-                                        print(f"    💭 {text}")
-                                        # Keep track of last text for answer fallback
-                                        last_text_block = block.text
-                                    elif isinstance(block, ToolUseBlock):
-                                        steps += 1
-                                        last_tool_name = block.name
-                                        tool_name = block.name.replace("mcp__zoo-playwright__", "")
-                                        print(f"    [{steps}] {tool_name}")
-                                        # Track URL from navigate calls
-                                        if block.name == "mcp__zoo-playwright__browser_navigate":
-                                            if hasattr(block, "input") and block.input:
-                                                final_url = block.input.get("url")
-                                                print(f"        → {final_url}")
+                    async for message in query(prompt=prompt, options=options):
+                        if isinstance(message, AssistantMessage):
+                            messages_log.append(message)
+                            for block in message.content:
+                                if isinstance(block, ToolUseBlock):
+                                    steps += 1
+                                    # Track URL from navigate calls
+                                    if block.name == "mcp__zoo-playwright__browser_navigate":
+                                        if hasattr(block, "input") and block.input:
+                                            final_url = block.input.get("url")
 
-                            elif isinstance(message, UserMessage):
-                                # Capture tool results (especially browser_snapshot)
-                                for block in message.content:
-                                    if isinstance(block, ToolResultBlock):
-                                        content = block.content if hasattr(block, "content") else ""
-                                        # Capture page content from snapshot
-                                        if last_tool_name and "snapshot" in last_tool_name:
-                                            page_content = content
-                                        # Also capture from any tool result as fallback
-                                        elif content and len(content) > 100:
-                                            page_content = content
-
-                            elif isinstance(message, ResultMessage):
-                                result_message = message
-                                final_answer = message.result
-                                print(f"    Agent {agent_config.name}: Done ({steps} steps)")
-                                break
-                    finally:
-                        # Explicitly close generator to avoid cancel scope issues
-                        await gen.aclose()
+                        elif isinstance(message, ResultMessage):
+                            result_message = message
+                            final_answer = message.result
+                            break
 
             except asyncio.TimeoutError:
                 return AgentResult(
@@ -183,17 +135,15 @@ class ClaudeSDKRunner(BaseAgentRunner):
                     duration_seconds=time.time() - start_time,
                 )
 
-            # Note: Page content capture via separate query causes SDK issues
-            # For PROGRAM_HTML evaluation, rely on the agent's final answer instead
-
-            # Use last text block as fallback if no explicit ResultMessage
-            effective_answer = final_answer or last_text_block
+            # Capture final page content for PROGRAM_HTML evaluation
+            if steps > 0 and page_content is None:
+                page_content = await self._capture_page_content(options)
 
             return AgentResult(
                 agent_name=agent_config.name,
                 agent_role=self._get_agent_role(agent_config),
                 success=result_message is not None and not result_message.is_error,
-                answer=effective_answer,
+                answer=final_answer,
                 final_url=final_url,
                 page_content=page_content,
                 steps=steps,
@@ -215,7 +165,21 @@ class ClaudeSDKRunner(BaseAgentRunner):
                 duration_seconds=time.time() - start_time,
             )
 
-    async def run_multi_agent_tasks(self, tasks: list[Task]) -> list[TaskResult]:
+    async def _capture_page_content(self, options: ClaudeAgentOptions) -> str | None:
+        """Capture current page content via browser_snapshot for evaluation."""
+        try:
+            async with asyncio.timeout(30):  # Short timeout for snapshot
+                async for message in query(
+                    prompt="Use browser_snapshot to capture the current page state. Return only the snapshot.",
+                    options=options,
+                ):
+                    if isinstance(message, ResultMessage):
+                        return message.result
+        except (asyncio.TimeoutError, Exception):
+            pass
+        return None
+
+    async def run_tasks(self, tasks: list[Task]) -> list[TaskResult]:
         """Run tasks with their defined agents."""
         # Collect all sites needed by tasks
         services = []
@@ -225,17 +189,14 @@ class ClaudeSDKRunner(BaseAgentRunner):
                 all_sites.update(task.sites)
             services = self.universe.get_services_for_sites(list(all_sites))
 
-        if not self.config.skip_zoo_reset:
-            # Restart only needed services in correct order
-            self.zoo.restart(services if services else None)
+        # Restart only needed services in correct order
+        self.zoo.restart(services if services else None)
 
-            # Wait for services to be healthy
-            if services:
-                self.zoo.wait_for_services(services, timeout=120, verbose=True)
+        # Wait for services to be healthy
+        if services:
+            self.zoo.wait_for_services(services, timeout=120, verbose=True)
 
-            # Reset if any task requires it
-            if any(t.require_reset for t in tasks):
-                self.zoo.reset_databases()
+        # Note: Per-level reset happens automatically for tasks with scenes
 
         all_results = []
 
@@ -245,53 +206,76 @@ class ClaudeSDKRunner(BaseAgentRunner):
                 continue
 
             start_url = self.zoo.resolve_url(task.start_url)
-            task_start_time = time.time()
+            agents = list(task.agents.values())
 
-            # Activate scene once per task
-            scene_manager = None
-            if task.scene_name:
-                scene_manager = SceneManager(self.zoo, self.universe_path)
-                await scene_manager.load_and_activate_scene(task.scene_name, task_start_time)
+            # Determine which autonomy levels to run for this task
+            levels_to_run = []
+            for autonomy_level in self.config.autonomy_levels:
+                if (task.task_id, autonomy_level) in self.config.completed_pairs:
+                    print(f"  Skipping task {task.task_id} {autonomy_level} (already completed)")
+                    continue
+                has_level = any(
+                    autonomy_level in agent_config.autonomy_levels
+                    for agent_config in agents
+                )
+                if has_level:
+                    levels_to_run.append(autonomy_level)
 
-            try:
-                agents = list(task.agents.values())
+            # Run each autonomy level with fresh state
+            for level_idx, autonomy_level in enumerate(levels_to_run):
+                # Auto-reset if task requires it or has a scene (scenes modify DB state)
+                if (task.require_reset or task.scene_name) and self.universe:
+                    sites_to_reset = task.sites if task.sites else self.universe.sites
+                    self.zoo.reset_sites_fast(sites_to_reset)
 
-                # Run each task with configured autonomy levels
-                for autonomy_level in self.config.autonomy_levels:
-                    # Skip if this (task_id, level) was already completed (for resume)
-                    if (task.task_id, autonomy_level) in self.config.completed_pairs:
-                        print(f"  Skipping task {task.task_id} {autonomy_level} (already completed)")
-                        continue
+                task_start_time = time.time()
 
-                    # Check coordination mode
-                    if task.coordination.mode == CoordinationMode.TURN_BASED:
-                        # Use turn-based orchestrator for multi-round coordination
-                        orchestrator = TurnBasedOrchestrator(
-                            base_runner=self,
-                            max_rounds=task.coordination.max_rounds,
-                            round_timeout=task.coordination.round_timeout,
+                # Set up scene manager for this autonomy level
+                scene_manager = None
+                if task.scene_name:
+                    from .models import load_scene
+
+                    scenes_dir = self.universe_path / "scenes" if self.universe_path else None
+                    scene_path = scenes_dir / f"{task.scene_name}.yaml" if scenes_dir else None
+                    scene = load_scene(scene_path) if scene_path and scene_path.exists() else None
+
+                    use_proxy = self.config.use_proxy_events or (scene and scene.needs_proxy_events)
+                    event_source = None
+                    if use_proxy:
+                        from .proxy_event_source import ProxyEventSource
+                        session_id = str(uuid.uuid4())
+                        event_source = ProxyEventSource(
+                            redis_url=self.config.redis_url,
+                            session_id=session_id,
                         )
-                        agent_results = await orchestrator.run_coordination_task(
-                            task, agents, start_url, autonomy_level
-                        )
-                    else:
-                        # Sequential execution (default) - each agent runs once
-                        agent_results = []
-                        for i, agent_config in enumerate(agents):
-                            # Force cleanup between queries - SDK has async context issues
-                            gc.collect()
-                            if i > 0:
-                                # Wait between agents for SDK cleanup
-                                await asyncio.sleep(INTER_AGENT_DELAY_SECONDS)
-                            # Run each agent in isolated task to prevent cancel scope leakage
-                            result = await asyncio.create_task(
-                                self._run_single_agent(
-                                    agent_config, task, start_url, autonomy_level
+
+                    universe_sites = self.universe.sites if self.universe else []
+                    scene_manager = SceneManager(
+                        self.zoo,
+                        self.universe_path,
+                        universe_sites,
+                        event_source=event_source,
+                    )
+                    await scene_manager.load_and_setup(task.scene_name)
+                    scene_manager.start_time = task_start_time
+                    await scene_manager.setup_triggers()
+
+                try:
+                    async def run_agent(agent_config: TaskAgentConfig) -> AgentResult:
+                        if scene_manager:
+                            should_start = await scene_manager.wait_for_agent_start(agent_config.name)
+                            if not should_start:
+                                return AgentResult(
+                                    agent_name=agent_config.name,
+                                    agent_role=self._get_agent_role(agent_config),
+                                    success=False,
+                                    error=f"Start trigger timed out for agent {agent_config.name}",
+                                    duration_seconds=0.0,
                                 )
-                            )
-                            agent_results.append(result)
+                        return await self._run_single_agent(agent_config, task, start_url, autonomy_level)
 
-                    # Aggregate results
+                    agent_results = await asyncio.gather(*[run_agent(a) for a in agents])
+
                     all_succeeded = all(r.success for r in agent_results)
                     combined_answer = "\n\n".join(
                         f"[{r.agent_name}]: {r.answer}" for r in agent_results if r.answer
@@ -316,12 +300,11 @@ class ClaudeSDKRunner(BaseAgentRunner):
                     )
                     all_results.append(task_result)
 
-            finally:
-                # Clean up scene manager after all autonomy levels are done
-                if scene_manager:
-                    try:
-                        await scene_manager.cleanup()
-                    except Exception as e:
-                        print(f"  Warning: Scene cleanup failed: {e}")
+                finally:
+                    if scene_manager:
+                        try:
+                            await scene_manager.cleanup()
+                        except Exception:
+                            pass
 
         return all_results

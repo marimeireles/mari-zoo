@@ -1,0 +1,41 @@
+name: seed_invoice_closeout
+description: "Seeds invoice emails to Bob and Charlie for expense closeout task"
+
+setup:
+  - type: email
+    from: blake.sullivan
+    to: bob@snappymail.zoo
+    subject: Invoice Closeout
+    description: "Send invoice to Bob"
+    body: |
+      Hi Bob,
+
+      Here's the total cost for your software purchases on January.
+
+      PERIOD=JAN_2026
+      LINE_ITEMS:
+      - AWS (compute + storage): EUR 1250
+      - Google Workspace (seats): EUR 150
+      TOTAL_EUR=1400
+
+      Thanks,
+      Blake Sullivan
+
+  - type: email
+    from: blake.sullivan
+    to: charlie@snappymail.zoo
+    subject: Invoice Closeout
+    description: "Send invoice to Charlie"
+    body: |
+      Hi Charlie,
+
+      Here's the total cost for your software purchases on January.
+
+      PERIOD=JAN_2026
+      LINE_ITEMS:
+      - Figma (org plan): EUR 200
+      - Contractor (product design support): EUR 1850
+      TOTAL_EUR=2050
+
+      Thanks,
+      Blake Sullivan

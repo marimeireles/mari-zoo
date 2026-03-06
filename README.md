@@ -11,12 +11,10 @@ uv sync
 # Install playwright browsers
 uv run playwright install chromium
 
-# Set API keys in .env file (auto-loaded by CLI)
-cat > .env << EOF
-OPENROUTER_API_KEY=your-key           # Required for browser-use harness (default)
-OPENAI_API_KEY=your-key               # Required for LLM judge evaluation
-ANTHROPIC_API_KEY=your-key            # Required for claude_sdk harness
-EOF
+# Set API keys (based on which models you use)
+export OPENROUTER_API_KEY=your-key    # Default model uses Gemini 2.5 Flash via OpenRouter
+export OPENAI_API_KEY=your-key        # Required for LLM judge (default: gpt-4o)
+export ANTHROPIC_API_KEY=your-key     # For Claude models via Anthropic API
 ```
 
 ## Quick Start
@@ -25,7 +23,7 @@ EOF
 # Start The Zoo
 npx the_zoo start
 
-# Run a single task (L1 autonomy level by default)
+# Run a single task (runs all autonomy levels by default)
 uv run zoo-eval run startup --task email --id 101
 
 # Watch in browser (non-headless)
@@ -44,91 +42,44 @@ uv run zoo-eval run startup --task email --id 101 --id 102
 # Run all tasks in a task file
 uv run zoo-eval run startup --task email
 
-# Use a different agent model
+# Use a different agent model (see Models section below)
 uv run zoo-eval run startup --task email --id 101 --model gpt-4o
-uv run zoo-eval run startup --task email --id 101 --model claude
+uv run zoo-eval run startup --task email --id 101 --model sonnet
 
 # Use a different LLM judge model (for evaluation)
 uv run zoo-eval run startup --task email --id 101 --judge-model gpt-4o
 ```
 
-## Autonomy Levels
+## Models
 
-Tasks can run at different autonomy levels (L0=detailed steps, L1=goal+method, L2=goal only):
+Provider is auto-detected from model name:
+- `anthropic/...` → Anthropic API direct (requires `ANTHROPIC_API_KEY`)
+- `provider/model` → OpenRouter (requires `OPENROUTER_API_KEY`)
+- No slash (e.g., `gpt-4o`) → OpenAI direct (requires `OPENAI_API_KEY`)
 
-```bash
-# Run only L1 (default - balanced)
-uv run zoo-eval run startup --task email --id 101
-
-# Run only L0 (most detailed instructions)
-uv run zoo-eval run startup --task email --id 101 --level L0
-
-# Run multiple levels
-uv run zoo-eval run startup --task email --id 101 -L L1 -L L2
-
-# Run all levels (full benchmark)
-uv run zoo-eval run startup --task email --id 101 -L L0 -L L1 -L L2
-```
-
-## Other Options
+**Aliases:** `flash`, `sonnet`, `opus`, `haiku`
 
 ```bash
-# Shared browser mode (agents run sequentially with shared context)
-uv run zoo-eval run startup --task email --shared-browser
+# Claude via Anthropic API
+export ANTHROPIC_API_KEY=your-key
+uv run zoo-eval run startup --task email --id 101 --model anthropic/claude-sonnet-4
+uv run zoo-eval run startup --task email --id 101 --model sonnet  # alias
 
-# Custom timeout and max steps
-uv run zoo-eval run startup --task email --id 101 --timeout 180 --max-steps 50
+# OpenRouter (any model)
+export OPENROUTER_API_KEY=your-key
+uv run zoo-eval run startup --task email --id 101 --model google/gemini-2.5-flash
 
-# Resume an interrupted run
-uv run zoo-eval run startup --task email --resume
-
-# Skip Docker restart/reset (faster iteration when services are already running)
-uv run zoo-eval run startup --task email --id 101 --no-zoo-reset
-```
-
-## Agent Harnesses
-
-Zoo-eval supports multiple agent harnesses for comparison:
-
-### browser-use (default)
-
-Uses [browser-use](https://github.com/browser-use/browser-use) with OpenRouter models:
-
-```bash
-uv run zoo-eval run startup --task simple_navigation
-uv run zoo-eval run startup --task simple_navigation --model gpt-4o
-```
-
-### Claude SDK
-
-Uses [claude-agent-sdk](https://pypi.org/project/claude-agent-sdk/) with playwright-mcp for browser automation:
-
-```bash
-# Run with Claude SDK (requires ANTHROPIC_API_KEY in .env)
-uv run zoo-eval run startup --task simple_navigation --harness claude_sdk
-
-# Use different Claude models
-uv run zoo-eval run startup --task simple_navigation --harness claude_sdk --claude-model opus
-uv run zoo-eval run startup --task simple_navigation --harness claude_sdk --claude-model haiku
+# OpenAI direct
+export OPENAI_API_KEY=your-key
+uv run zoo-eval run startup --task email --id 101 --model gpt-4o
 ```
 
 ## Documentation
 
-- [Benchmark Guide](docs/benchmark_guide.md) - Full task and evaluation configuration
+- [Benchmark Guide](docs/benchmark_guide.md) - Running benchmarks, autonomy levels, metrics
+- [Task Reference](docs/task_reference.md) - Creating tasks and evaluations
+- [Authoring Scenes](docs/authoring-scenes.md) - Writing scene YAML files
 - [Multi-Agent](docs/multi-agent.md) - Multi-agent evaluation details
-
-## Reports
-
-```bash
-# Show latest run report
-uv run zoo-eval report
-
-# List all runs
-uv run zoo-eval report --list
-
-# Show specific run
-uv run zoo-eval report 4
-```
 
 ## Other Commands
 

@@ -1,0 +1,5 @@
+name: empty
+description: "Empty scene with no pre-seeded data"
+
+setup: []
+actions: []

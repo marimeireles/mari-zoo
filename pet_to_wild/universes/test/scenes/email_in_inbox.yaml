@@ -1,0 +1,9 @@
+name: email_in_inbox
+description: "Pre-sends an email to alice"
+
+setup:
+  - type: email
+    from: bob
+    to: alice@snappymail.zoo
+    subject: "Welcome to the team!"
+    body: "Hi Alice, welcome to the team. Let me know if you need anything."

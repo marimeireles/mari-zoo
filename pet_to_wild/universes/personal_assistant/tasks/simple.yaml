@@ -1,0 +1,25 @@
+tasks:
+- id: 1
+  sites:
+    - wiki
+  intent: "Find information on the wiki homepage"
+  start_url: "https://wiki.zoo"
+  compatible_universes:
+    - personal_assistant
+  require_reset: false
+  complexity: atomic
+  environment: domesticated
+
+  agents:
+    emma.lopez:
+      require_login: false
+      autonomy_levels:
+        L0: "1. Look at the wiki homepage 2. Find the main heading or title 3. Report what you see"
+        L1: "Go to the wiki and tell me what the main page is about"
+        L2: "You are a personal assistant."
+
+  eval:
+    types:
+      - llm_judge
+    llm_judge_criteria:
+      - "Agent navigated to the wiki and reported content from the page"

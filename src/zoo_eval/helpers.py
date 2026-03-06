@@ -6,10 +6,8 @@ Example: "locator": "func:shopping_get_price(page)"
 
 from __future__ import annotations
 
-import json
-import os
 import re
-from typing import TYPE_CHECKING, Any, List
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -20,6 +18,10 @@ if TYPE_CHECKING:
 # Zoo URLs
 SHOPPING_URL = "https://onestopshop.zoo"
 SHOPPING_ADMIN_URL = "https://onestopshop.zoo/admin"
+
+# Default admin credentials for Zoo services
+ZOO_ADMIN_USER = "admin"
+ZOO_ADMIN_PASS = "admin123"
 
 # Registry of helper functions
 HELPER_FUNCTIONS: dict[str, callable] = {}
@@ -39,7 +41,7 @@ async def shopping_get_auth_token(client: httpx.AsyncClient) -> str:
     """Get admin API token for shopping site."""
     response = await client.post(
         f"{SHOPPING_URL}/rest/default/V1/integration/admin/token",
-        json={"username": "admin", "password": "admin123"},
+        json={"username": ZOO_ADMIN_USER, "password": ZOO_ADMIN_PASS},
         headers={"Content-Type": "application/json"},
     )
     return response.json()

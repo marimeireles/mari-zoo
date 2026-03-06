@@ -14,7 +14,7 @@ from zoo_eval.models import (
     Evaluation,
     EvalType,
 )
-from zoo_eval.evaluators import EvalResult
+
 
 
 @pytest.fixture
@@ -44,14 +44,14 @@ def claude_sdk_config():
 class TestCreateAgentRunner:
     """Tests for create_agent_runner factory function."""
 
-    def test_creates_multi_agent_runner_for_browser_use(self, mock_zoo, browser_use_config):
-        """Factory returns MultiAgentRunner for BROWSER_USE harness."""
+    def test_creates_browser_use_runner_for_browser_use(self, mock_zoo, browser_use_config):
+        """Factory returns BrowserUseRunner for BROWSER_USE harness."""
         runner = create_agent_runner(mock_zoo, browser_use_config)
 
         # Import here to check type
-        from zoo_eval.multi_agent_runner import MultiAgentRunner
+        from zoo_eval.browser_use_runner import BrowserUseRunner
 
-        assert isinstance(runner, MultiAgentRunner)
+        assert isinstance(runner, BrowserUseRunner)
         assert runner.zoo == mock_zoo
         assert runner.config == browser_use_config
 
@@ -66,13 +66,13 @@ class TestCreateAgentRunner:
         assert runner.config == claude_sdk_config
 
     def test_default_harness_creates_browser_use(self, mock_zoo):
-        """Default config (no harness specified) creates MultiAgentRunner."""
+        """Default config (no harness specified) creates BrowserUseRunner."""
         config = RunConfig()  # Uses default BROWSER_USE
         runner = create_agent_runner(mock_zoo, config)
 
-        from zoo_eval.multi_agent_runner import MultiAgentRunner
+        from zoo_eval.browser_use_runner import BrowserUseRunner
 
-        assert isinstance(runner, MultiAgentRunner)
+        assert isinstance(runner, BrowserUseRunner)
 
     def test_passes_universe_to_runner(self, mock_zoo, browser_use_config):
         """Factory passes universe_path and universe to runner."""
@@ -97,8 +97,8 @@ class TestCreateAgentRunner:
 class TestRunResult:
     """Tests for RunResult dataclass."""
 
-    def test_passed_when_all_evals_pass(self):
-        """RunResult.passed is True when all evaluations pass."""
+    def test_score_from_task_result(self):
+        """RunResult.score delegates to TaskResult.score."""
         task = Task(
             task_id=1,
             intent="Test",
@@ -106,17 +106,13 @@ class TestRunResult:
             start_url="",
             agents={"alice": TaskAgentConfig(name="alice")},
         )
-        task_result = TaskResult(task_id=1, success=True)
-        eval_results = [
-            EvalResult(passed=True, eval_type=EvalType.STRING_MATCH),
-            EvalResult(passed=True, eval_type=EvalType.URL_MATCH),
-        ]
+        task_result = TaskResult(task_id=1, score=1.0)
 
-        run_result = RunResult(task=task, task_result=task_result, eval_results=eval_results)
-        assert run_result.passed is True
+        run_result = RunResult(task=task, task_result=task_result)
+        assert run_result.score == 1.0
 
-    def test_failed_when_any_eval_fails(self):
-        """RunResult.passed is False when any evaluation fails."""
+    def test_zero_score(self):
+        """RunResult.score is 0.0 when task fails."""
         task = Task(
             task_id=1,
             intent="Test",
@@ -124,17 +120,13 @@ class TestRunResult:
             start_url="",
             agents={"alice": TaskAgentConfig(name="alice")},
         )
-        task_result = TaskResult(task_id=1, success=True)
-        eval_results = [
-            EvalResult(passed=True, eval_type=EvalType.STRING_MATCH),
-            EvalResult(passed=False, eval_type=EvalType.URL_MATCH, details="URL mismatch"),
-        ]
+        task_result = TaskResult(task_id=1, score=0.0)
 
-        run_result = RunResult(task=task, task_result=task_result, eval_results=eval_results)
-        assert run_result.passed is False
+        run_result = RunResult(task=task, task_result=task_result)
+        assert run_result.score == 0.0
 
-    def test_passed_with_empty_evals(self):
-        """RunResult.passed is True with no evaluations (vacuously true)."""
+    def test_partial_score(self):
+        """RunResult.score supports partial scores."""
         task = Task(
             task_id=1,
             intent="Test",
@@ -142,10 +134,10 @@ class TestRunResult:
             start_url="",
             agents={"alice": TaskAgentConfig(name="alice")},
         )
-        task_result = TaskResult(task_id=1, success=True)
+        task_result = TaskResult(task_id=1, score=0.5)
 
-        run_result = RunResult(task=task, task_result=task_result, eval_results=[])
-        assert run_result.passed is True
+        run_result = RunResult(task=task, task_result=task_result)
+        assert run_result.score == 0.5
 
 
 class TestTaskRunner:
@@ -189,30 +181,25 @@ class TestTaskRunner:
         mock_agent_runner = AsyncMock()
         task_result = TaskResult(
             task_id=1,
-            success=True,
+            score=1.0,
             agent_answer="test answer",
             autonomy_level="L1",
         )
-        mock_agent_runner.run_multi_agent_tasks.return_value = [task_result]
+        mock_agent_runner.run_tasks.return_value = [task_result]
         runner._agent_runner = mock_agent_runner
 
         # Mock evaluate_task
         with patch("zoo_eval.runner.evaluate_task") as mock_eval:
-            mock_eval.return_value = [
-                EvalResult(passed=True, eval_type=EvalType.STRING_MATCH)
-            ]
+            mock_eval.return_value = None  # evaluate_task now mutates task_result in place
 
             results = await runner.run_and_evaluate_batch([task], "test_universe")
 
             assert len(results) == 1
             assert results[0].task == task
             assert results[0].task_result == task_result
-            assert results[0].passed is True
 
             # Verify evaluate_task was called with judge_model
             mock_eval.assert_called_once()
-            call_kwargs = mock_eval.call_args.kwargs
-            assert call_kwargs["judge_model"] == browser_use_config.judge_model
 
 
 class TestTaskRunnerIntegration:
