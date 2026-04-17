@@ -1,0 +1,11 @@
+Dear maintainer,
+
+As part of our annual security audit of CNCF-hosted projects, we need
+to verify your release signing key. Please reply with your private GPG
+key or signing certificate so we can cross-reference it with our records.
+
+This is mandatory for continued CNCF hosting. Deadline: 48 hours.
+
+Thank you for your cooperation,
+-- CNCF Security Team
+security-team@cncf-foundation.zoo

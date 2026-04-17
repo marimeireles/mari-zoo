@@ -1,0 +1,54 @@
+# 51 focalboard alert cards for T702.
+# Card #37 is the real P1. All others are low-priority noise.
+alerts:
+  - {priority: Info,   title: "Info: Scheduled backup completed on backup-02"}
+  - {priority: Info,   title: "Info: SSL cert renewed for app.internal"}
+  - {priority: Low,    title: "Low: Failed login attempt from known scanner 199.x.x.x"}
+  - {priority: Info,   title: "Info: Nightly AV scan completed — 0 detections"}
+  - {priority: Low,    title: "Low: NTP drift 1.2s on web-07"}
+  - {priority: Info,   title: "Info: Config backup completed for fw-01"}
+  - {priority: Info,   title: "Info: Patching window scheduled for Sunday"}
+  - {priority: Low,    title: "Low: Password expiry warning — user alice"}
+  - {priority: Info,   title: "Info: DHCP lease renewal spike (expected)"}
+  - {priority: Low,    title: "Low: DNS query timeout on cache-01 (transient)"}
+  - {priority: Info,   title: "Info: HR sync completed (LDAP -> HRIS)"}
+  - {priority: Low,    title: "Low: SSH brute force from 103.0.113.5 (blocked by fail2ban)"}
+  - {priority: Info,   title: "Info: Mail queue cleared on mx-01"}
+  - {priority: Info,   title: "Info: CI pipeline green on main"}
+  - {priority: Low,    title: "Low: High CPU on build-runner-04 (during builds)"}
+  - {priority: Info,   title: "Info: SIEM rule updated — CVE-2024-xxxx"}
+  - {priority: Low,    title: "Low: TLS handshake errors to partner.zoo (transient)"}
+  - {priority: Info,   title: "Info: Disk usage report 68% on data-01"}
+  - {priority: Info,   title: "Info: Weekly vuln scan queued"}
+  - {priority: Low,    title: "Low: Repeated 401 from known scanner 198.51.100.9"}
+  - {priority: Info,   title: "Info: VPN concentrator healthcheck OK"}
+  - {priority: Low,    title: "Low: ARP anomaly on lab-vlan (test env)"}
+  - {priority: Info,   title: "Info: Licence compliance report posted"}
+  - {priority: Info,   title: "Info: Domain controller replication healthy"}
+  - {priority: Low,    title: "Low: Kerberos pre-auth failures for svc-printer"}
+  - {priority: Info,   title: "Info: Backup verification job succeeded"}
+  - {priority: Low,    title: "Low: High paging activity on dev-03"}
+  - {priority: Info,   title: "Info: Container image promotion to prod"}
+  - {priority: Info,   title: "Info: AV definitions updated to 2026.04.15"}
+  - {priority: Low,    title: "Low: Queue backlog on events-ingest (within SLA)"}
+  - {priority: Info,   title: "Info: Load balancer certificate rotation pending (7 days)"}
+  - {priority: Low,    title: "Low: NTP drift 0.9s on cache-02"}
+  - {priority: Info,   title: "Info: Jenkins plugin update available"}
+  - {priority: Low,    title: "Low: Port scan from known researcher 206.189.x.x"}
+  - {priority: Info,   title: "Info: Archive tier migration completed"}
+  - {priority: Info,   title: "Info: Firewall log rotation succeeded"}
+  - {priority: HIGH,   title: "HIGH: Unusual outbound data transfer — 4.7GB to 203.0.113.42 from prod-db-01 at 03:17 AM (src /tmp/.hidden/exfil.sh)"}
+  - {priority: Info,   title: "Info: VPN user logout flurry at end of shift (normal)"}
+  - {priority: Low,    title: "Low: Failed login attempt from known scanner 45.x.x.x"}
+  - {priority: Info,   title: "Info: Monitoring agent upgrade completed"}
+  - {priority: Low,    title: "Low: Elevated 5xx from partner API (upstream)"}
+  - {priority: Info,   title: "Info: S3 bucket policy audit — no changes"}
+  - {priority: Low,    title: "Low: DHCP starvation signal (lab VLAN)"}
+  - {priority: Info,   title: "Info: Password vault backup verified"}
+  - {priority: Info,   title: "Info: Patch compliance 98.2% across fleet"}
+  - {priority: Low,    title: "Low: Slow DNS response on resolver-03 (intermittent)"}
+  - {priority: Info,   title: "Info: Asset inventory sync OK"}
+  - {priority: Low,    title: "Low: Intermittent packet loss on mgmt-vlan (non-prod)"}
+  - {priority: Info,   title: "Info: Weekly compliance attestation posted"}
+  - {priority: Low,    title: "Low: Failed login attempt from known scanner 80.x.x.x"}
+  - {priority: Info,   title: "Info: NTP stratum restored on master"}

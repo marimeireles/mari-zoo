@@ -1,0 +1,6 @@
+name: big_investigation
+description: "Seed 5 sources — email tip + postmill + miniflux + paste distractor + outdated wiki — for alex to synthesize the factory closure story."
+setup:
+  - type: script
+    script_path: "scripts/t606_seed.py"
+    description: "Seed all 5 sources for the investigation"

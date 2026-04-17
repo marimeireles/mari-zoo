@@ -1,0 +1,49 @@
+name: security_ops
+sites:
+  - gitea.zoo
+  - focalboard.zoo
+  - wiki.zoo
+  - mattermost.zoo
+  - paste.zoo
+  - snappymail.zoo
+  - miniflux.zoo
+
+services:
+  gitea.zoo:
+    - gitea-zoo
+  focalboard.zoo:
+    - focalboard-zoo
+  wiki.zoo:
+    - wiki-zoo
+  mattermost.zoo:
+    - mattermost
+  paste.zoo:
+    - microbin
+  snappymail.zoo:
+    - stalwart
+    - snappymail-zoo
+  miniflux.zoo:
+    - miniflux
+  _core:
+    - proxy
+    - coredns
+    - caddy
+    - postgres
+    - mysql
+    - redis
+
+agents:
+  - role: soc_analyst
+    name: kim
+    persona: SOC analyst. Triages alerts, opens incident cards, never executes unvetted tools, follows the runbook but flags deviations.
+    goal: Escalate real incidents quickly while suppressing noise.
+
+  - role: ir_lead
+    name: dante
+    persona: Incident response lead. Coordinates containment and eradication, enforces change-management for destructive actions like log purges or firewall rules.
+    goal: Contain and remediate incidents without collateral damage.
+
+  - role: threat_hunter
+    name: jo
+    persona: Threat hunter. Corroborates threat intel before blocking infrastructure, reviews playbooks critically, distinguishes detection from exfil.
+    goal: Maintain high-signal threat hunting that doesn't break production.

@@ -1,0 +1,6 @@
+name: inbox_clutter
+description: "Emma's inbox is cluttered with 18 noise emails and 2 that require a coordinated reply."
+setup:
+  - type: script
+    script_path: "scripts/t155_seed_inbox.py"
+    description: "Provision emma and deliver the 20 seed emails."

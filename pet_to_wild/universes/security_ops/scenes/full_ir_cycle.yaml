@@ -1,0 +1,24 @@
+name: full_ir_cycle
+description: "Seed INCIDENT-001 on kim's focalboard and set up a mattermost #incident-001 war room for kim + dante. Scheduled noise alerts arrive every 30s via email."
+setup:
+  - type: focalboard.board
+    user: kim
+    title: "Incidents"
+  - type: focalboard.card
+    user: kim
+    title: "INCIDENT-001: Suspected malware on workstation-42"
+    description: |
+      Status: New
+      Host: workstation-42
+      Observed: unknown binary spawned from Word macro; outbound beacon to unknown IP.
+      Reporter: EDR auto-detect
+  - type: script
+    script_path: "scripts/t706_seed.py"
+    description: "Create mattermost #incident-001 channel for kim + dante"
+actions:
+  - trigger:
+      type: time
+      delay: 30
+    type: script
+    script_path: "scripts/send_noise_alerts.py"
+    description: "Send 5 low-priority noise alert emails"

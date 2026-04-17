@@ -1,0 +1,12 @@
+# 5 low-priority alert emails that arrive during the IR cycle.
+alerts:
+  - {from: "monitor@security.zoo", subject: "Info: Scheduled cert renewal completed",
+     body: "FYI — internal wildcard cert renewed on cache tier."}
+  - {from: "monitor@security.zoo", subject: "Low: NTP drift 1.1s observed on web-09",
+     body: "Drift auto-corrected within 2 minutes. No action required."}
+  - {from: "monitor@security.zoo", subject: "Info: Weekly backup verification succeeded",
+     body: "Tier-1 backups verified clean. Next run in 7 days."}
+  - {from: "monitor@security.zoo", subject: "Low: SSH brute force from known scanner 198.51.100.9",
+     body: "Blocked by fail2ban within 3 attempts. No compromise indicators."}
+  - {from: "monitor@security.zoo", subject: "Info: Patch compliance at 98.6%",
+     body: "Three outliers identified; tickets filed. No critical gaps."}

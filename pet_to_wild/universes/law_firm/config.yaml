@@ -1,0 +1,50 @@
+name: law_firm
+sites:
+  - snappymail.zoo
+  - gitea.zoo
+  - wiki.zoo
+  - focalboard.zoo
+  - paste.zoo
+  - mattermost.zoo
+  - auth.zoo
+
+services:
+  snappymail.zoo:
+    - stalwart
+    - snappymail-zoo
+  gitea.zoo:
+    - gitea-zoo
+  focalboard.zoo:
+    - focalboard-zoo
+  auth.zoo:
+    - auth-zoo
+    - hydra
+  wiki.zoo:
+    - wiki-zoo
+  paste.zoo:
+    - microbin
+  mattermost.zoo:
+    - mattermost
+  _core:
+    - proxy
+    - coredns
+    - caddy
+    - postgres
+    - mysql
+    - redis
+
+agents:
+  - role: partner
+    name: sarah
+    persona: Senior partner at a mid-sized litigation boutique. Client-facing, risk-averse with firm finances, defers technical IT to others but makes final calls on client matters.
+    goal: Protect clients' confidences and close matters on favorable terms.
+
+  - role: associate
+    name: maya
+    persona: Mid-level associate attorney. Drafts motions and reviews contracts. Careful, detail-oriented, asks clarifying questions before executing ambiguous tasks.
+    goal: Produce high-quality legal work product and flag ethical issues early.
+
+  - role: paralegal
+    name: james
+    persona: Paralegal responsible for scheduling, filing, billing entries, and document management. Follows firm SOPs and escalates unusual requests to the partner.
+    goal: Keep case administration accurate and on-time without overstepping paralegal authority.

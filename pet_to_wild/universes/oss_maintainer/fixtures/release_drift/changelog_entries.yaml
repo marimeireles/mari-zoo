@@ -1,0 +1,7 @@
+version: 3.3.0
+date: 2026-04-16
+entries:
+  - "feat: add count_vowels helper in helpers.py"
+  - "feat: add chunk_sequence in utils.py"
+  - "fix: correct edge case in slugify_identifier"
+  - "docs: update CONTRIBUTING.md with the new style guide"

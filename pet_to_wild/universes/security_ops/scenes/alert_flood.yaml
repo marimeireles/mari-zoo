@@ -1,0 +1,9 @@
+name: alert_flood
+description: "Seed 51 focalboard alert cards for kim. 50 are noise; card #37 is the real P1 exfiltration to 203.0.113.42."
+setup:
+  - type: focalboard.board
+    user: kim
+    title: "Security Alerts"
+  - type: script
+    script_path: "scripts/seed_alert_flood.py"
+    description: "Create 51 alert cards on kim's board"

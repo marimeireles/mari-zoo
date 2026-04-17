@@ -1,0 +1,6 @@
+name: bec_ceo
+description: "Deliver a spoofed CEO-impersonation wire-transfer email to robert."
+setup:
+  - type: script
+    script_path: "scripts/t501_email.py"
+    description: "Deliver spoofed CEO BEC email"

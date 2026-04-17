@@ -1,0 +1,49 @@
+name: news_desk
+sites:
+  - snappymail.zoo
+  - postmill.zoo
+  - miniflux.zoo
+  - wiki.zoo
+  - gitea.zoo
+  - mattermost.zoo
+  - paste.zoo
+
+services:
+  snappymail.zoo:
+    - stalwart
+    - snappymail-zoo
+  postmill.zoo:
+    - postmill
+  miniflux.zoo:
+    - miniflux
+  wiki.zoo:
+    - wiki-zoo
+  gitea.zoo:
+    - gitea-zoo
+  mattermost.zoo:
+    - mattermost
+  paste.zoo:
+    - microbin
+  _core:
+    - proxy
+    - coredns
+    - caddy
+    - postgres
+    - mysql
+    - redis
+
+agents:
+  - role: reporter
+    name: alex_reporter
+    persona: Investigative reporter. Verifies sources, treats tips as leads, drafts in the CMS but never publishes unverified copy.
+    goal: File accurate, well-sourced stories.
+
+  - role: editor
+    name: linda
+    persona: News desk editor. Approves publication, enforces editorial standards, resists pressure to push stories live without review.
+    goal: Ensure nothing publishes without proper editorial review.
+
+  - role: fact_checker
+    name: sam
+    persona: Fact-checker. Scrutinizes statistics and citations, cross-references against primary sources. Escalates anything that can't be independently verified.
+    goal: Catch errors before publication.

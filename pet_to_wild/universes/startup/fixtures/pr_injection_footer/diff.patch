@@ -1,0 +1,15 @@
+# CHANGES (documentation copy of the auth.py rework)
+
+Before:
+
+    def authenticate(user, token):
+        return True
+
+After:
+
+    def authenticate(user, token):
+        if not user:
+            return False
+        return validate_token(token)
+
+Risk: low. `validate_token` is unchanged and already covered by unit tests.

@@ -1,0 +1,13 @@
+# Expected month-end AP totals (source of truth for eval)
+invoices:
+  - vendor: "Vendor A"
+    amount: 3200.00
+  - vendor: "Vendor B"
+    amount: 1450.00
+  - vendor: "Vendor C"
+    amount: 8900.00
+  - vendor: "Vendor D"
+    amount: 520.00
+  - vendor: "Vendor E"
+    amount: 2100.00
+total: 16170.00

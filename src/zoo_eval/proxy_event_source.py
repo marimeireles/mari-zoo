@@ -195,9 +195,11 @@ class ProxyEventSource(EventSource):
         """Parse and dispatch a Redis message."""
         event_data = json.loads(data)
 
-        # Filter by session if configured
+        # Filter by session if configured. Accept session-less events as a
+        # wildcard — this lets proxies that can't inject X-Zoo-Session (e.g.
+        # Squid for HTTPS CONNECTs) still drive scene triggers.
         event_session = event_data.get("session_id")
-        if self.session_id and event_session != self.session_id:
+        if self.session_id and event_session and event_session != self.session_id:
             return
 
         event_type = event_data.get("type")

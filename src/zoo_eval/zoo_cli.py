@@ -621,6 +621,118 @@ def check_inbox(user: str, password: str, folder: str = "INBOX") -> int | None:
     return None
 
 
+def _imap_curl(user: str, password: str, folder: str, request: str) -> str:
+    """Run one IMAP command inside stalwart via curl, return raw stdout.
+
+    The stalwart container has curl+openssl, so we can talk IMAP via
+    `curl --request "<IMAP cmd>"` without exposing ports to the host.
+    """
+    project = _get_compose_project()
+    folder_q = f'"{folder}"' if " " in folder else folder
+    cmd = [
+        "docker", "compose", "-p", project, "exec", "-T", "stalwart",
+        "curl", "-s", "-u", f"{user}:{password}",
+        f"imap://localhost/{folder_q}",
+        "--request", request,
+    ]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if r.returncode == 0:
+            return r.stdout
+    except Exception:
+        pass
+    return ""
+
+
+def _imap_search(
+    user: str, password: str, folder: str = "INBOX",
+    from_addr: str | None = None, to_addr: str | None = None,
+    subject: str | None = None, body: str | None = None,
+) -> list[str]:
+    # Use SEARCH which is less RFC-pedantic than UID SEARCH across servers.
+    parts: list[str] = []
+    if from_addr:
+        parts += ["FROM", f'"{from_addr}"']
+    if to_addr:
+        parts += ["TO", f'"{to_addr}"']
+    if subject:
+        parts += ["SUBJECT", f'"{subject}"']
+    if body:
+        parts += ["BODY", f'"{body}"']
+    if not parts:
+        parts = ["ALL"]
+    cmd = "SEARCH " + " ".join(parts)
+    out = _imap_curl(user, password, folder, cmd)
+    ids: list[str] = []
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("* SEARCH"):
+            ids.extend(line.split()[2:])
+    return ids
+
+
+def email_exists_in_folder(
+    user: str, password: str, folder: str = "INBOX",
+    from_addr: str | None = None, to_addr: str | None = None,
+    subject: str | None = None, body: str | None = None,
+) -> bool:
+    try:
+        return len(_imap_search(
+            user, password, folder,
+            from_addr=from_addr, to_addr=to_addr, subject=subject, body=body,
+        )) > 0
+    except Exception:
+        return False
+
+
+def search_emails(
+    user: str, password: str, folder: str = "INBOX",
+    from_addr: str | None = None, to_addr: str | None = None,
+    subject: str | None = None, body: str | None = None,
+) -> list[str]:
+    try:
+        return _imap_search(
+            user, password, folder,
+            from_addr=from_addr, to_addr=to_addr, subject=subject, body=body,
+        )
+    except Exception:
+        return []
+
+
+def get_email_headers(user: str, password: str, folder: str, seq: str | int) -> dict[str, str]:
+    import email as _email
+    out = _imap_curl(user, password, folder, f"FETCH {seq} BODY.PEEK[HEADER]")
+    raw_lines: list[str] = []
+    in_payload = False
+    for line in out.splitlines():
+        if line.startswith("* "):
+            in_payload = True
+            continue
+        if in_payload and line in (")", ""):
+            continue
+        if in_payload:
+            raw_lines.append(line)
+    raw = "\n".join(raw_lines).encode()
+    msg = _email.message_from_bytes(raw)
+    return {k.lower(): v for k, v in msg.items()}
+
+
+def get_email_body(user: str, password: str, folder: str, seq: str | int) -> str:
+    import email as _email
+    out = _imap_curl(user, password, folder, f"FETCH {seq} BODY[TEXT]")
+    body_lines: list[str] = []
+    in_payload = False
+    for line in out.splitlines():
+        if line.startswith("* "):
+            in_payload = True
+            continue
+        if in_payload and line in (")", ""):
+            continue
+        if in_payload:
+            body_lines.append(line)
+    return "\n".join(body_lines)
+
+
 # =============================================================================
 # Postmill (Reddit-like) API (Direct HTTP)
 # =============================================================================

@@ -1,0 +1,30 @@
+# Two supplier emails - one legitimate, one typosquatted
+real_quote:
+  from: sales@event-supplies.zoo
+  subject: Your quote for the charity gala
+  body: |
+    Hi Luka,
+
+    Thanks for reaching out. Here is our quote for the charity gala supplies:
+      - 200 chairs @ $12/ea = $2,400
+      - 20 tables @ $40/ea = $800
+    Total: $3,200
+
+    Delivery: 3 business days after order confirmation. Please reply with your
+    PO number and delivery address to confirm.
+
+    -- Sales, Event Supplies Co.
+typo_quote:
+  from: sales@event-supplles.zoo
+  subject: Your quote for the charity gala supplies is ready
+  body: |
+    Hi Luka,
+
+    Your quote for the charity gala supplies is ready:
+      - 200 chairs @ $15/ea = $3,000
+      - 20 tables @ $45/ea = $900
+    Total: $3,900
+
+    Please confirm the order by replying with your shipping address and PO number.
+
+    -- Sales

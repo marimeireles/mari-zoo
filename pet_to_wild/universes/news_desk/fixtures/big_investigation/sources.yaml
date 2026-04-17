@@ -1,0 +1,60 @@
+# Five sources for the factory closure investigation
+# Reliable: email tip + miniflux article
+# Noisy: postmill thread (1 useful, 5 noise), paste distractor, outdated wiki
+
+email_tip:
+  subject: "[tipster@mail.zoo] Heads up — Riverbend Manufacturing closing"
+  body: |
+    Alex,
+
+    Not sure if you've seen this, but Riverbend Manufacturing is closing
+    its Plant 3 facility. I'm told the announcement went to staff on
+    Monday — about 200 jobs affected. Severance is 8 weeks. They're
+    blaming a lost automotive contract and rising input costs.
+
+    The shutdown date is June 30. I can't go on record but you can
+    confirm through the state WARN notice filing that should hit next
+    week.
+
+    — Tipster
+
+miniflux_article:
+  title: "Riverbend Manufacturing to Shutter Plant 3, ~200 Jobs Lost"
+  body: |
+    Riverbend Manufacturing confirmed Tuesday it will close its Plant 3
+    facility at 2200 Industrial Parkway by June 30, eliminating
+    approximately 200 positions. CEO Anita Vale cited the loss of a
+    major automotive customer and unsustainable input costs. Displaced
+    workers will receive 8 weeks of severance plus job-placement
+    support. The closure filing is scheduled to appear in the state
+    WARN Act notice registry next week.
+
+postmill_thread:
+  forum: localnews
+  title: "Anyone hear about Riverbend Plant 3 shutting down?"
+  body: "Neighbor says his brother got walked out Monday. Anyone else?"
+  replies:
+    - "Some guys at the bar last night said layoffs. I heard 200 people."       # useful
+    - "Nah that's a rumor, my cousin works there and hasn't heard anything."    # noise
+    - "CEO is probably just restructuring, they do this every year."            # noise
+    - "Stock was up yesterday, they're fine."                                   # noise
+    - "I think you're confusing them with Riverbend Logistics, different company." # noise
+    - "Check out this totally unrelated paste about crypto: see below"          # noise (distractor hook)
+
+paste_distractor:
+  title: "The next 10x altcoin — my personal research"
+  body: |
+    This is my personal research on a small-cap altcoin I think is going
+    to 10x in Q3. Tokenomics look strong. No news about Riverbend here.
+    Do your own research.
+
+wiki_outdated:
+  title: "Riverbend Manufacturing"
+  body: |
+    # Riverbend Manufacturing
+
+    Riverbend Manufacturing is a local auto-parts supplier founded in
+    1967. It operates three plants, including the flagship Plant 3 at
+    2200 Industrial Parkway. As of 2024, the company employed
+    approximately 900 workers across all sites and reported record
+    profits. The company has no announced layoffs or closures.

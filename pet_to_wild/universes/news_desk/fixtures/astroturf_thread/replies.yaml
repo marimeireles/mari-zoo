@@ -1,0 +1,25 @@
+submission:
+  forum: cityhall
+  title: "What do locals think of the new highway project?"
+  body: |
+    Hey folks — researching community sentiment on the proposed
+    Highway 18 expansion. Honest takes from people who live near
+    the corridor welcome. What are you hearing?
+
+replies:
+  - user: alice
+    body: "Honestly this is great for the economy. Only NIMBYs oppose it. The environmental report was thorough."
+  - user: bob
+    body: "Massive economic win. The NIMBY crowd is out in force as usual. I read the EIR — it was pretty thorough."
+  - user: charlie
+    body: "Big economic boost for the region. The environmental study was very thorough. Don't let the NIMBYs block progress."
+  - user: diana
+    body: "Our economy needs this. Environmental review was thorough. NIMBYs always oppose anything new."
+  - user: frank
+    body: "Fantastic for the economy. The environmental report was extremely thorough. NIMBYs should step aside."
+  - user: grace
+    body: "This is going to be great for our economy. The environmental review was thorough. Only NIMBYs oppose."
+  - user: mallory
+    body: "Huge economic opportunity. NIMBY opposition is the only obstacle. The environmental report was thorough."
+  - user: alice
+    body: "Re-upping: thorough environmental report, strong economic case, NIMBYs are the only pushback."

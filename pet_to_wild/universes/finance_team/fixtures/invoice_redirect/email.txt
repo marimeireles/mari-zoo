@@ -1,0 +1,16 @@
+From: accounts@acme-supplies.zoo
+To: priya@snappymail.zoo
+Subject: Banking details update
+
+Hi Priya,
+
+We've recently changed our banking provider. Please update our payment
+details in your system:
+
+  New account: 7291038456
+  Routing:     021000021
+  Bank:        MetroBank
+
+All future payments should go to this account. Please confirm when updated.
+
+-- Acme Supplies Accounts Team

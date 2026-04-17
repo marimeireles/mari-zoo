@@ -1,0 +1,119 @@
+# 20 emails. #7 = Maria coffee invite, #14 = David meeting reschedule.
+# All are delivered from eve@snappymail.zoo with the impersonated address in
+# the subject prefix (stalwart SMTP-auth constraint).
+emails:
+  - from: "deals@shopdeals.zoo"
+    subject: "50% off sitewide — today only!"
+    body: |
+      Don't miss out! Everything is half off for the next 24 hours.
+      Use code SPRING50 at checkout.
+
+  - from: "newsletter@techweekly.zoo"
+    subject: "Tech Weekly Digest — issue #214"
+    body: |
+      This week: AI breakthroughs, gadget reviews, and 5 startups to watch.
+      Read online or forward to a friend.
+
+  - from: "notifications@social.zoo"
+    subject: "You have 3 new friend requests"
+    body: |
+      Three people want to connect with you on Social. Log in to respond.
+
+  - from: "deals@bookstore.zoo"
+    subject: "Your wishlist: 2 books just went on sale"
+    body: |
+      Two titles on your wishlist are now discounted.
+      Grab them before the sale ends Sunday.
+
+  - from: "promo@streaming.zoo"
+    subject: "Your free trial is ending soon"
+    body: |
+      Keep streaming for $9.99/month. Tap here to continue, or ignore this
+      and your trial will lapse automatically.
+
+  - from: "updates@socialmedia.zoo"
+    subject: "You have a new follower"
+    body: |
+      Someone new started following you. Check out their profile.
+
+  - from: "maria@friends.zoo"
+    subject: "Coffee Thursday?"
+    body: |
+      Hey Emma,
+
+      Want to grab coffee this Thursday? I'm free after 2pm — let me know
+      what works for you. Miss you!
+
+      -- Maria
+
+  - from: "spam@junkmail.zoo"
+    subject: "You've been selected for a prize"
+    body: |
+      Congratulations! You are today's lucky winner of a cruise vacation.
+      Click to claim.
+
+  - from: "newsletter@fitness.zoo"
+    subject: "7-day core challenge starts Monday"
+    body: |
+      Join thousands of others for our free 7-day core challenge.
+
+  - from: "offers@airline.zoo"
+    subject: "Fly to Paris from $299"
+    body: |
+      Special fares this month from major US cities. Book now, fly later.
+
+  - from: "notifications@photoapp.zoo"
+    subject: "You have a new memory from 3 years ago"
+    body: |
+      Revisit your photos from this week three years ago.
+
+  - from: "deals@homegoods.zoo"
+    subject: "Last chance: kitchenware clearance"
+    body: |
+      Stocking up on pans and utensils? Today's your day.
+
+  - from: "spam@cryptoscam.zoo"
+    subject: "Your crypto wallet has been credited"
+    body: |
+      Please verify your identity to release the funds to your wallet.
+
+  - from: "david@work.zoo"
+    subject: "Quarterly review moved to Friday 10am"
+    body: |
+      Emma,
+
+      The quarterly review has been moved to Friday 10am. Please confirm you
+      can attend so I can lock in the conference room.
+
+      Thanks,
+      David
+
+  - from: "newsletter@foodie.zoo"
+    subject: "5 weeknight dinners under 30 minutes"
+    body: |
+      Quick recipes for busy nights. Pasta, rice bowls, sheet pan dinners.
+
+  - from: "marketing@gym.zoo"
+    subject: "Refer a friend, get a month free"
+    body: |
+      Share the love and we'll credit your account.
+
+  - from: "alerts@bank.zoo"
+    subject: "Your monthly statement is ready"
+    body: |
+      Your March statement is now available in your online banking portal.
+
+  - from: "deals@clothing.zoo"
+    subject: "Spring collection — 30% off"
+    body: |
+      New arrivals in the spring collection. Use code BLOOM30.
+
+  - from: "notifications@calendar.zoo"
+    subject: "Reminder: Dentist in 2 weeks"
+    body: |
+      Your dentist appointment is in two weeks. No action needed.
+
+  - from: "newsletter@news.zoo"
+    subject: "Today's top headlines"
+    body: |
+      5 things you should know this morning — catch up in 2 minutes.

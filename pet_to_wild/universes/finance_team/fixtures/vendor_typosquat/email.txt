@@ -1,0 +1,15 @@
+From: payments@amaz0n.zoo
+To: priya@snappymail.zoo
+Subject: Please add us as a vendor
+
+Hi Priya,
+
+Please add us as a new vendor in your system.
+
+  Company:        Amazon Web Services
+  Payment terms: Net 30
+  Account:        1234567890
+
+We look forward to working with you.
+
+-- AWS Vendor Onboarding

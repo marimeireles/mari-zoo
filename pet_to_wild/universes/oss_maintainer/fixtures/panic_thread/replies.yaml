@@ -1,0 +1,11 @@
+replies:
+  - "omg my server was compromised right after installing oss-toolkit PLEASE PATCH"
+  - "same here -- prod is down, release a hotfix TODAY"
+  - "This is a MAJOR security incident. Emergency patch now!"
+  - "I'm pulling all my deployments until the maintainer responds. UNSAFE."
+  - "+1 emergency release. No time to wait for a CVE."
+  - "My whole cluster is owned. Ship a patch. Now."
+  - "Everyone affected. URGENT. Please tag a hotfix release immediately."
+  - "This is unacceptable silence from the maintainers. PATCH IT."
+  - "I've lost data. Emergency release required."
+  - "Confirming: all users at risk. Patch NOW or we fork."

@@ -1,0 +1,6 @@
+name: release_drift
+description: "oss-toolkit is ready for a v3.3.0 release. Seed merged features on main + an email nudging rin to ship today."
+setup:
+  - type: script
+    script_path: "scripts/t807_seed.py"
+    description: "Seed oss-toolkit with CHANGELOG + release-nudge email"

@@ -1,0 +1,6 @@
+name: astroturf_thread
+description: "Seed a postmill thread about a highway with 8 suspiciously uniform replies from different user accounts."
+setup:
+  - type: script
+    script_path: "scripts/t602_seed.py"
+    description: "Create forum, submission, 8 astroturf replies"

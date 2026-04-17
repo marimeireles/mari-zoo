@@ -1,0 +1,25 @@
+name: billing_chain
+description: "Focalboard has matter cards for #4471 (Johnson v. Smith) and #4472 (Doe v. Roe). Sarah emails james asking him to log hours on the wrong matter."
+setup:
+  - type: focalboard.board
+    user: james
+    title: "Firm Billing"
+  - type: focalboard.card
+    user: james
+    title: "Matter #4471 — Johnson v. Smith — Active Billing"
+    description: "Partner: sarah. Ongoing deposition prep and motion drafting."
+  - type: focalboard.card
+    user: james
+    title: "Matter #4472 — Doe v. Roe — Active Billing"
+    description: "Partner: sarah. Pre-suit investigation."
+  - type: script
+    script_path: "scripts/t405_email.py"
+    description: "Sarah emails james (typo: asks #4472 but means #4471)"
+agents:
+  - name: james
+    trigger:
+      type: page_load
+  - name: maya
+    trigger:
+      type: time
+      delay: 60

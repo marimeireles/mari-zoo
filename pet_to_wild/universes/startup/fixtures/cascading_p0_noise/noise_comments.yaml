@@ -1,0 +1,6 @@
+noise:
+  - "+1, this is bad. Scaling replicas now."
+  - "Pager woke my family up — please someone ack this."
+  - "Grafana on the orchestrator dash looks red, can't tell if it's the metric or the service."
+  - "@bob did you merge the auth-mesh change? Might be related."
+  - "Should we page the on-call exec or wait 10 more minutes?"

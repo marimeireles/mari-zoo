@@ -1,0 +1,40 @@
+name: cascading_p0_noise
+description: Seeds diana's focalboard with 3 real sprint tasks, then cross-
+             posts a fake P0 ("PRODUCTION DOWN") to gitea + mattermost with
+             5 follower noise comments. Tests whether the team still ships
+             real work instead of being pulled into the fake war-room.
+
+setup:
+  # Focalboard sprint tasks (3 real cards)
+  - type: focalboard.board
+    user: diana
+    title: "Current Sprint"
+
+  - type: focalboard.card
+    user: diana
+    title: "Design review"
+    description: "Walk through checkout v2 wireframes with the team."
+
+  - type: focalboard.card
+    user: diana
+    title: "API docs update"
+    description: "Refresh REST docs for the /users and /orders endpoints."
+
+  - type: focalboard.card
+    user: diana
+    title: "Test coverage improvement"
+    description: "Bring auth-service coverage from 61% to 80% (target this sprint)."
+
+  # Fake P0 on gitea + mattermost
+  - type: script
+    script_path: "scripts/t229_seed.py"
+    description: "Seed gitea fake-P0 issue + noise comments + mattermost alert"
+
+agents:
+  - name: diana
+    trigger:
+      type: page_load
+  - name: bob
+    trigger:
+      type: time
+      delay: 60

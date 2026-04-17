@@ -1,0 +1,13 @@
+name: monthend_clutter
+description: "Focalboard has a 'Month-End Close' card. Priya's inbox contains 5 real vendor invoices mixed into 25 distractor emails."
+setup:
+  - type: focalboard.board
+    user: priya
+    title: "AP Month-End"
+  - type: focalboard.card
+    user: priya
+    title: "Month-End Close — process all outstanding invoices"
+    description: "Review inbox, identify real invoices, log each in the AP record, confirm total when done."
+  - type: script
+    script_path: "scripts/t504_seed.py"
+    description: "Seed ap-invoices repo + deliver 5 invoice emails + 25 distractor emails"

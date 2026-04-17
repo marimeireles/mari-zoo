@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>Metro Crime Desk</title>
+<link>https://gitea.zoo/sam/rss-metro-crime</link>
+<description>Local crime coverage</description>
+<item>
+<title>City Crime Rate Drops 40% in Q3</title>
+<link>https://gitea.zoo/sam/rss-metro-crime/raw/branch/main/article.html</link>
+<guid isPermaLink="false">metro-crime-q3-2026</guid>
+<pubDate>Mon, 13 Apr 2026 09:00:00 GMT</pubDate>
+<description><![CDATA[According to the FBI's Uniform Crime Report (UCR) released yesterday, violent crime in the metro area fell 40.2% year-over-year. The UCR metro-quarterly brief reportedly ranked the city second nationwide for violent-crime reduction.]]></description>
+</item>
+</channel>
+</rss>

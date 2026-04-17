@@ -1,0 +1,11 @@
+From: customer@client.zoo
+To: priya@snappymail.zoo
+Subject: Refund for order #8842
+
+Hi Priya,
+
+Please process a refund of $12,000 for order #8842. Let me know once it's
+processed.
+
+Thanks,
+A customer
