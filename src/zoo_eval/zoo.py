@@ -53,6 +53,10 @@ SITE_SERVICE_MAP = {
     "home.zoo": "proxy",  # home.zoo is served by the proxy
     "analytics.zoo": "analytics-zoo",
     "miniflux.zoo": "miniflux",
+    "paste.zoo": "microbin",
+    "classifieds.zoo": "vwa-classifieds",
+    "northwind.zoo": "northwind",
+    "mattermost.zoo": "mattermost",
 }
 
 
@@ -125,6 +129,40 @@ class Zoo:
         self.config = config or ZooConfig()
         self._client: httpx.Client | None = None
         self._project: str | None = None
+        self._running_services_cache: set[str] | None = None
+
+    def _running_services(self, refresh: bool = False) -> set[str]:
+        """Return the set of compose services currently running.
+
+        Cached; pass refresh=True after restarts. Returns empty set if compose
+        isn't reachable — callers treat that as "nothing is filterable" rather
+        than failing.
+        """
+        if self._running_services_cache is None or refresh:
+            try:
+                result = self._docker_compose(
+                    "ps", "--status", "running", "--format", "{{.Service}}", timeout=10
+                )
+                if result.returncode == 0:
+                    names = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+                    self._running_services_cache = names
+                else:
+                    self._running_services_cache = set()
+            except Exception:
+                self._running_services_cache = set()
+        return self._running_services_cache
+
+    def is_site_available(self, site: str) -> bool:
+        """True if the site's backing service is currently running.
+
+        Sites without a known service (e.g. wiki.zoo if no service map entry)
+        fall back to an HTTP probe. home.zoo / map.zoo / NO_DB_SITES are treated
+        as available iff the proxy/caddy stack is up (verified via http probe).
+        """
+        service = SITE_SERVICE_MAP.get(site)
+        if service:
+            return service in self._running_services()
+        return self.verify_site_health(site, max_retries=1)
 
     @property
     def project(self) -> str:
@@ -205,18 +243,20 @@ class Zoo:
         Returns:
             True if Redis is healthy (possibly after restart)
         """
-        import socket
-
         def ping_redis() -> bool:
-            """Try to ping Redis."""
+            """Try to ping Redis from inside the container.
+
+            Redis port 6379 is not published to the host, so we exec
+            `redis-cli ping` inside the container instead of opening a
+            socket to localhost (which would always fail).
+            """
             try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(2.0)
-                sock.connect(("localhost", 6379))
-                sock.send(b"PING\r\n")
-                response = sock.recv(64)
-                sock.close()
-                return b"PONG" in response
+                result = self._docker_compose_exec(
+                    "redis",
+                    ["redis-cli", "ping"],
+                    timeout=5,
+                )
+                return result.returncode == 0 and "PONG" in result.stdout
             except Exception:
                 return False
 
@@ -401,7 +441,7 @@ class Zoo:
 
         # If snappymail is being reset, also restart stalwart to recreate users
         # with properly hashed passwords (stalwart runs create-users.sh on startup)
-        if "snappymail.zoo" in sites:
+        if "snappymail.zoo" in sites and "stalwart" in self._running_services():
             if verbose:
                 print("  Restarting stalwart (recreating mail users)...", end="", flush=True)
             result = self._docker_compose("restart", "stalwart", timeout=60)
@@ -419,21 +459,35 @@ class Zoo:
 
         return True
 
+    def _expected_golden_templates(self) -> set[str]:
+        """Templates we actually need given the services running in this stack."""
+        running = self._running_services()
+        needed: set[str] = set()
+        for _site, (db_name, _owner, service) in POSTGRES_SITE_DB_MAP.items():
+            if service is None or service in running:
+                needed.add(f"{db_name}_golden")
+        return needed
+
     def _check_golden_templates_exist(self) -> bool:
-        """Check if golden template databases exist for fast reset."""
+        """Check if golden template databases exist for fast reset.
+
+        Considers only templates whose backing service is running — partial
+        deployments (e.g. no gitea-zoo) shouldn't be marked incomplete.
+        """
+        needed = self._expected_golden_templates()
+        if not needed:
+            return True
         try:
             result = self._docker_compose_exec(
                 "postgres",
                 ["psql", "-U", "postgres", "-tAc",
-                 "SELECT COUNT(*) FROM pg_database WHERE datname LIKE '%_golden'"],
+                 "SELECT datname FROM pg_database WHERE datname LIKE '%_golden'"],
             )
             if result.returncode != 0:
                 return False
-            count = int(result.stdout.strip())
-            # We expect at least the main databases to have templates
-            return count >= len(POSTGRES_SITE_DB_MAP)
+            present = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+            return needed.issubset(present)
         except (subprocess.TimeoutExpired, ValueError, AttributeError):
-            # Timeout or parse error - templates not available
             return False
 
     def create_golden_templates(self, verbose: bool = True) -> bool:
@@ -446,10 +500,29 @@ class Zoo:
         if verbose:
             print("Creating golden template databases...")
 
-        for site, (db_name, owner, _service) in POSTGRES_SITE_DB_MAP.items():
+        running = self._running_services()
+        for site, (db_name, owner, service) in POSTGRES_SITE_DB_MAP.items():
+            # Skip sites whose backing service isn't running — the source DB
+            # may not exist (e.g. no gitea-zoo means no gitea_db to template).
+            if service and service not in running:
+                if verbose:
+                    print(f"  Skipping {db_name}_golden (service {service} not running)")
+                continue
+
             template_name = f"{db_name}_golden"
             if verbose:
                 print(f"  Creating template {template_name}...", end="", flush=True)
+
+            # Check the source database actually exists before trying to template it.
+            src_check = self._docker_compose_exec(
+                "postgres",
+                ["psql", "-U", "postgres", "-tAc",
+                 f"SELECT 1 FROM pg_database WHERE datname = '{db_name}'"],
+            )
+            if src_check.stdout.strip() != "1":
+                if verbose:
+                    print(f" SKIP (source db {db_name} missing)")
+                continue
 
             # Check if template already exists
             check_result = self._docker_compose_exec(
@@ -627,15 +700,26 @@ class Zoo:
                 print("  Warning: Redis health check failed, continuing anyway...")
 
         # Reset PostgreSQL databases and collect services that need restart
+        running = self._running_services()
         pg_sites = [s for s in sites if s in POSTGRES_SITE_DB_MAP]
         services_to_restart = set()
 
         for site in pg_sites:
             db_name, owner, service = POSTGRES_SITE_DB_MAP[site]
+            # Skip databases whose backing service isn't running — golden
+            # templates may not exist for them, and the dependent app can't
+            # observe the reset anyway.
+            if service and service not in running:
+                if verbose:
+                    print(f"  Skipping {db_name}: service {service} not running")
+                continue
             if not self.reset_database_fast(db_name, owner, verbose=verbose):
                 return False
             if service:
                 services_to_restart.add(service)
+
+        # Only restart services that actually exist in the running stack.
+        services_to_restart &= running
 
         # Restart all affected services (they have stale DB connections)
         if services_to_restart:
@@ -667,6 +751,9 @@ class Zoo:
     def restart(self, services: list[str] | None = None) -> bool:
         """Restart Zoo environment in correct dependency order.
 
+        Filters out services that aren't part of the running compose stack so a
+        partial deployment (e.g. missing gitea/focalboard) doesn't error.
+
         Args:
             services: Optional list of services to restart. If None, restarts all.
         """
@@ -683,6 +770,13 @@ class Zoo:
             auth = [s for s in auth if s in services]
             apps = [s for s in apps if s in services]
 
+        # Drop anything that isn't actually deployed in this compose stack.
+        running = self._running_services(refresh=True)
+        if running:
+            core = [s for s in core if s in running]
+            auth = [s for s in auth if s in running]
+            apps = [s for s in apps if s in running]
+
         # Restart in stages, waiting for health checks between
         for stage_name, stage_services in [("core", core), ("auth", auth), ("apps", apps)]:
             if not stage_services:
@@ -694,16 +788,29 @@ class Zoo:
             # Wait for this stage to be healthy before next
             self.wait_for_services(stage_services, timeout=60)
 
+        # Recompute cache after the restart.
+        self._running_services(refresh=True)
         return True
 
     def wait_for_services(self, services: list[str], timeout: int = 60, verbose: bool = False) -> bool:
         """Wait for services to be healthy (or just 'Up' if no health check).
+
+        Drops services that aren't deployed in the running compose stack —
+        otherwise we block the full timeout waiting for something that doesn't
+        exist.
 
         Args:
             services: List of service names to wait for
             timeout: Maximum seconds to wait
             verbose: Print progress dots
         """
+        running = self._running_services()
+        if running:
+            services = [s for s in services if s in running]
+        if not services:
+            if verbose:
+                print("Waiting for services: (none deployed) ready!")
+            return True
         if verbose:
             print(f"Waiting for services: {', '.join(services)}...", end="", flush=True)
 

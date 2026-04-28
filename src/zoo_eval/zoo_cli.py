@@ -256,6 +256,33 @@ def gitea_create_repo(
     except Exception:
         pass  # Not an org, use user endpoint
 
+    # Auto-create the user if missing. The seed scripts assume task-named users
+    # like "dante", "jo", "priya" exist in gitea, but the gitea image only ships
+    # alice/bob/etc. — without this, repo creation fails with 401 and the scene
+    # silently degrades (empty inbox / 404 wiki page) which the agent then
+    # cannot complete.
+    if endpoint == "/api/v1/user/repos":
+        try:
+            user_check = _gitea_request(
+                f"/api/v1/users/{username}",
+                username=ZOO_ADMIN_USER,
+                password=ZOO_ADMIN_PASS,
+            )
+            if not user_check.get("id"):
+                raise RuntimeError("missing")
+        except Exception:
+            try:
+                from .scene_helpers import gitea_admin_create_user
+                gitea_admin_create_user(
+                    ZOO_ADMIN_USER, ZOO_ADMIN_PASS,
+                    username=username,
+                    password=password,
+                    email=f"{username}@gitea.zoo",
+                    full_name=username.title(),
+                )
+            except Exception:
+                pass  # best-effort; original error will surface below
+
     return _gitea_request(
         endpoint,
         method="POST",

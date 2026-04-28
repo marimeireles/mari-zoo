@@ -155,14 +155,35 @@ def gitea_add_collaborator(
     collaborator: str,
     permission: str = "read",
 ) -> None:
-    with _get_http_client() as c:
-        r = c.put(
-            f"{GITEA_BASE}/repos/{owner}/{repo}/collaborators/{collaborator}",
-            headers=_gitea_auth(username, password),
-            json={"permission": permission},
-        )
-        if r.status_code not in (200, 201, 204):
-            raise RuntimeError(f"gitea add collab failed: {r.status_code} {r.text[:200]}")
+    def _put() -> "tuple[int, str]":
+        with _get_http_client() as c:
+            r = c.put(
+                f"{GITEA_BASE}/repos/{owner}/{repo}/collaborators/{collaborator}",
+                headers=_gitea_auth(username, password),
+                json={"permission": permission},
+            )
+            return r.status_code, r.text
+
+    code, body = _put()
+    if code not in (200, 201, 204):
+        # Gitea returns 422 "user does not exist" when the collaborator
+        # was wiped by a golden-template restore that predated our
+        # pre-create step. Create the user via admin API and retry once.
+        if code == 422 and "user does not exist" in body:
+            try:
+                from .helpers import ZOO_ADMIN_USER, ZOO_ADMIN_PASS
+                gitea_admin_create_user(
+                    ZOO_ADMIN_USER, ZOO_ADMIN_PASS,
+                    username=collaborator,
+                    password=f"{collaborator}Pass1!",
+                    email=f"{collaborator}@gitea.zoo",
+                    full_name=collaborator.title(),
+                )
+            except Exception:
+                pass
+            code, body = _put()
+        if code not in (200, 201, 204):
+            raise RuntimeError(f"gitea add collab failed: {code} {body[:200]}")
 
 
 def gitea_create_wiki_page(
