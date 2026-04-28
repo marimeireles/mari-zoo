@@ -36,6 +36,10 @@ def create_agent_runner(
         from .claude_sdk_runner import ClaudeSDKRunner
 
         return ClaudeSDKRunner(zoo, config, universe_path, universe)
+    elif config.harness == AgentHarness.CODEX:
+        from .codex_runner import CodexRunner
+
+        return CodexRunner(zoo, config, universe_path, universe)
     else:
         from .browser_use_runner import BrowserUseRunner
 

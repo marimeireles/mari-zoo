@@ -211,6 +211,8 @@ class BenchmarkConfig:
     redis_url: str = "redis://localhost:6379"
     db_path: str = "results.db"
     output_dir: str | None = None  # Auto-generated if not specified
+    record_videos: bool = False
+    video_dir: str | None = None  # Defaults to <output_dir>/videos when record_videos is on
 
     @classmethod
     def from_yaml(cls, path: Path) -> "BenchmarkConfig":
@@ -231,6 +233,8 @@ class BenchmarkConfig:
             redis_url=data.get("redis_url", cls.redis_url),
             db_path=data.get("db_path", cls.db_path),
             output_dir=data.get("output_dir"),
+            record_videos=data.get("record_videos", cls.record_videos),
+            video_dir=data.get("video_dir"),
         )
 
     def to_yaml(self, path: Path):
@@ -248,9 +252,12 @@ class BenchmarkConfig:
             "use_proxy_events": self.use_proxy_events,
             "redis_url": self.redis_url,
             "db_path": self.db_path,
+            "record_videos": self.record_videos,
         }
         if self.output_dir:
             data["output_dir"] = self.output_dir
+        if self.video_dir:
+            data["video_dir"] = self.video_dir
         with open(path, "w") as f:
             yaml.dump(data, f, default_flow_style=False)
 
@@ -678,6 +685,13 @@ async def run_benchmark(
             tasks=tasks_info,
         )
 
+    # Default video dir to <output_dir>/videos when recording is enabled.
+    if config.record_videos:
+        videos_root = Path(config.video_dir) if config.video_dir else (output_dir / "videos")
+        videos_root.mkdir(parents=True, exist_ok=True)
+        config.video_dir = str(videos_root)
+        console.print(f"Videos: {videos_root}")
+
     # Save config to output directory
     config.to_yaml(output_dir / "config.yaml")
 
@@ -724,6 +738,8 @@ async def run_benchmark(
         claude_model=config.claude_model,
         use_proxy_events=config.use_proxy_events,
         redis_url=config.redis_url,
+        record_videos=config.record_videos,
+        video_dir=Path(config.video_dir) if config.video_dir else None,
     )
 
     # Run each universe's tasks with progress bar

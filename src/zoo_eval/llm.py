@@ -48,13 +48,33 @@ def detect_provider(model: str) -> str:
 
 
 def get_api_key(provider: str) -> str | None:
-    """Get API key for provider from environment."""
+    """Get API key for provider, falling back to known credential stores.
+
+    For openai, also reads `~/.codex/auth.json` if the env var is unset — the
+    codex CLI stores the key there, so codex-harness users don't have to
+    re-export it just so the LLM judge can call OpenAI directly.
+    """
     env_vars = {
         "anthropic": "ANTHROPIC_API_KEY",
         "openrouter": "OPENROUTER_API_KEY",
         "openai": "OPENAI_API_KEY",
     }
-    return os.environ.get(env_vars.get(provider, ""))
+    key = os.environ.get(env_vars.get(provider, ""))
+    if key:
+        return key
+    if provider == "openai":
+        return _read_codex_openai_key()
+    return None
+
+
+def _read_codex_openai_key() -> str | None:
+    import json
+    from pathlib import Path
+    auth = Path.home() / ".codex" / "auth.json"
+    try:
+        return json.loads(auth.read_text()).get("OPENAI_API_KEY") or None
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
 
 
 def _strip_provider_prefix(model: str) -> str:

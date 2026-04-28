@@ -83,13 +83,15 @@ def run(
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
     use_proxy_events: bool = typer.Option(False, "--use-proxy-events", help="Force proxy events (auto-detected from scene request triggers)"),
     redis_url: str = typer.Option("redis://localhost:6379", "--redis-url", help="Redis URL for proxy events"),
+    record_videos: bool = typer.Option(False, "--record-videos", help="Record one video per (task, level, agent); files land under <log_dir>/videos by default"),
+    video_dir: Path = typer.Option(None, "--video-dir", help="Override video output root (default: <log_dir>/videos)"),
 ):
     """Run evaluation tasks from a universe directory."""
     # Validate harness
     try:
         harness_enum = AgentHarness(harness)
     except ValueError:
-        console.print(f"[red]Invalid harness: {harness}. Valid: browser_use, claude_sdk[/red]")
+        console.print(f"[red]Invalid harness: {harness}. Valid: browser_use, claude_sdk, codex[/red]")
         raise typer.Exit(1)
 
     # Validate environment for Claude SDK
@@ -218,6 +220,13 @@ def run(
     log_dir = create_log_dir("run", universe_obj.name, task_file_name)
     console.print(f"Logs: {log_dir}")
 
+    # Default video dir to <log_dir>/videos when recording is enabled.
+    resolved_video_dir: Path | None = None
+    if record_videos:
+        resolved_video_dir = video_dir if video_dir is not None else (log_dir / "videos")
+        resolved_video_dir.mkdir(parents=True, exist_ok=True)
+        console.print(f"Videos: {resolved_video_dir}")
+
     console.print(f"Run #{run_id}: Running {len(tasks)} task(s) with harness={harness}, model={model_info}, levels=[{levels_str}]...")
     if completed_pairs:
         console.print(f"  ({len(remaining_pairs)} remaining, {len(completed_pairs)} already done)")
@@ -235,6 +244,8 @@ def run(
         claude_model=claude_model,
         use_proxy_events=use_proxy_events,
         redis_url=redis_url,
+        record_videos=record_videos,
+        video_dir=resolved_video_dir,
     )
     runner = TaskRunner(zoo, run_config, universe_path, universe_obj)
 
@@ -469,6 +480,8 @@ def benchmark(
     level: list[str] = typer.Option(None, "--level", "-L", help="Autonomy level(s): L0, L1, L2"),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume from last run"),
     proxy_port: int = typer.Option(3128, "--proxy-port", "-p", help="Zoo proxy port"),
+    record_videos: bool = typer.Option(False, "--record-videos", help="Record one video per (task, level, agent); files land under <output_dir>/videos by default"),
+    video_dir: Path = typer.Option(None, "--video-dir", help="Override video output root (default: <output_dir>/videos)"),
 ):
     """Run benchmark suite across universes and tasks.
 
@@ -479,6 +492,11 @@ def benchmark(
     # Load config from file or use CLI args
     if config_file and config_file.exists():
         config = BenchmarkConfig.from_yaml(config_file)
+        # CLI flags still override file values when explicitly passed
+        if record_videos:
+            config.record_videos = True
+        if video_dir is not None:
+            config.video_dir = str(video_dir)
     else:
         config = BenchmarkConfig(
             model=model,
@@ -489,6 +507,8 @@ def benchmark(
             timeout=timeout,
             autonomy_levels=level if level else list(AUTONOMY_LEVELS),
             proxy_port=proxy_port,
+            record_videos=record_videos,
+            video_dir=str(video_dir) if video_dir is not None else None,
         )
 
     universes_filter = list(universe) if universe else None

@@ -21,6 +21,7 @@ class AgentHarness(str, Enum):
 
     BROWSER_USE = "browser_use"
     CLAUDE_SDK = "claude_sdk"
+    CODEX = "codex"
 
 
 @dataclass
@@ -43,6 +44,11 @@ class RunConfig:
     # Proxy-based event source configuration (harness-agnostic scene triggers)
     use_proxy_events: bool = False  # Use Redis pub/sub for scene triggers (required for request triggers)
     redis_url: str = "redis://localhost:6379"  # Redis URL for proxy event source
+    # Video recording (browser_use harness only). Each (task, level, agent) gets its own
+    # subdir; recording starts when the per-run browser is created and ends on stop, so
+    # videos cover the agent run only — not setup/teardown/scene seeding.
+    record_videos: bool = False
+    video_dir: Path | None = None  # Root dir for videos; subdirs are created per task/level/agent
 
 
 class EvalType(str, Enum):

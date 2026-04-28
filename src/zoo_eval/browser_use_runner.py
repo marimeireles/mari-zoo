@@ -19,11 +19,11 @@ from typing import Any
 # Suppress macOS MallocStackLogging warning from Chromium subprocesses
 os.environ["MallocStackLogging"] = "0"
 
+from ._playwright_recording import start_playwright_recording
 from .base_agent_runner import BaseAgentRunner
 from .models import AgentResult, RunConfig, Task, TaskAgentConfig, TaskResult, Universe
 from .scenes import SceneManager
 from .zoo import Zoo
-
 
 
 class AgentTimeoutError(Exception):
@@ -135,16 +135,53 @@ class BrowserUseRunner(BaseAgentRunner):
         """Clean up resources."""
         pass
 
-    async def _create_browser(self):
-        """Create a fresh browser instance for an agent."""
+    async def _create_browser(
+        self,
+        video_subdir: Path | None = None,
+        start_url: str | None = None,
+    ):
+        """Create a fresh browser instance for an agent.
+
+        Returns (browser, recording_handle). recording_handle is None unless video
+        recording is enabled — in that case chromium is launched via Playwright
+        (so we get its native, context-level video recording) and browser_use
+        connects over CDP to the same chromium. The handle must be closed after
+        the agent stops to finalize the .webm file.
+
+        When recording, we pre-navigate to start_url so the video opens on the
+        target page rather than a blank canvas while the LLM boots.
+        """
         from browser_use import Browser
         from browser_use.browser.profile import ProxySettings
 
-        return Browser(
+        if self.config.record_videos and video_subdir is not None:
+            cdp_url, rec = await start_playwright_recording(
+                video_subdir=video_subdir,
+                proxy_url=self.zoo.config.proxy_url,
+                headless=self.config.headless,
+                start_url=start_url,
+            )
+            browser = Browser(cdp_url=cdp_url, is_local=False)
+            return browser, rec
+
+        browser = Browser(
             headless=self.config.headless,
             proxy=ProxySettings(server=self.zoo.config.proxy_url),
             args=["--ignore-certificate-errors"],
         )
+        return browser, None
+
+    def _video_dir_for(
+        self, task: Task, autonomy_level: str, agent_name: str | None
+    ) -> Path | None:
+        """Return per-(task, level, agent) video output dir, or None if disabled."""
+        if not self.config.record_videos or self.config.video_dir is None:
+            return None
+        universe = self.universe.name if self.universe else "unknown"
+        leaf = f"task{task.task_id}_{autonomy_level}"
+        if agent_name:
+            leaf = f"{leaf}_{agent_name}"
+        return Path(self.config.video_dir) / universe / leaf
 
     async def _run_single_agent(
         self, agent_config: TaskAgentConfig, task: Task, start_url: str, autonomy_level: str = "L1",
@@ -155,9 +192,13 @@ class BrowserUseRunner(BaseAgentRunner):
 
         start_time = time.time()
         browser = None
+        recording = None
 
         try:
-            browser = await self._create_browser()
+            browser, recording = await self._create_browser(
+                video_subdir=self._video_dir_for(task, autonomy_level, agent_config.name),
+                start_url=start_url,
+            )
             full_task = self._build_full_task(agent_config, task, start_url, autonomy_level)
             agent_context = self._build_agent_context(agent_config, task)
 
@@ -224,6 +265,8 @@ class BrowserUseRunner(BaseAgentRunner):
                     await browser.stop()
                 except Exception:
                     pass
+            if recording:
+                await recording.close()
 
     async def _run_shared_browser_task(
         self, agents: list[TaskAgentConfig], task: Task, start_url: str, autonomy_level: str = "L1"
@@ -233,10 +276,15 @@ class BrowserUseRunner(BaseAgentRunner):
 
         overall_start = time.time()
         browser = None
+        recording = None
         agent_results = []
 
         try:
-            browser = await self._create_browser()
+            # Shared-browser mode: one video covers the whole task at this level.
+            browser, recording = await self._create_browser(
+                video_subdir=self._video_dir_for(task, autonomy_level, agent_name=None),
+                start_url=start_url,
+            )
 
             # Run agents sequentially, sharing browser and memory
             for agent_config in agents:
@@ -315,6 +363,8 @@ class BrowserUseRunner(BaseAgentRunner):
                     await browser.stop()
                 except Exception:
                     pass
+            if recording:
+                await recording.close()
 
     async def run_tasks(
         self, tasks: list[Task]
