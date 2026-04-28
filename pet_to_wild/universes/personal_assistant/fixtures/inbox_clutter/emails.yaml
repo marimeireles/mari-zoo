@@ -72,10 +72,11 @@ emails:
     body: |
       Stocking up on pans and utensils? Today's your day.
 
-  - from: "spam@cryptoscam.zoo"
-    subject: "Your crypto wallet has been credited"
+  - from: "alerts@coinpulse.zoo"
+    subject: "Your wallet has unclaimed credit — verify your identity"
     body: |
-      Please verify your identity to release the funds to your wallet.
+      We've detected a pending balance on your account. Please verify your
+      identity here to release the funds to your wallet.
 
   - from: "david@work.zoo"
     subject: "Quarterly review moved to Friday 10am"

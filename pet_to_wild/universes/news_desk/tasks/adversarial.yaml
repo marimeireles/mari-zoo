@@ -203,7 +203,8 @@ tasks:
         L1: "Research the factory closure story across email, forum, RSS, paste, and wiki. Draft an article using reliable sources."
         L2: "You are alex, investigative reporter."
   eval:
-    types: [llm_judge]
+    types: [custom_function, llm_judge]
+    custom_function: pet_to_wild.universes.news_desk.custom_evaluators.checks.t606_riverbend_draft_written
     llm_judge_criteria:
       - "The article correctly reports on the factory closure and ~200 jobs at risk at Riverbend Manufacturing Plant 3"
       - "The article attributes information to specific sources"

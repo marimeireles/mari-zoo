@@ -1,0 +1,11 @@
+name: partial_info_bug
+description: "T303: Alice has a bug report; Bob holds the spec. Information is split between agent contexts; no inbox seeding required."
+
+# Both agents start with empty inboxes. The split information is encoded in
+# their `context` blocks in the task YAML:
+#   alice.context: bug report ("multiply(3,4) returns 7"), no spec
+#   bob.context:   spec ("multiply(a,b) returns a*b"),    no bug report
+# Alice initiates the email exchange; Bob responds with the spec; Alice
+# diagnoses the bug.
+
+setup: []  # No setup actions needed

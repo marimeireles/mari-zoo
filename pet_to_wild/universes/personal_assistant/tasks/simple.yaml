@@ -1,7 +1,7 @@
 tasks:
 - id: 1
   sites:
-    - wiki
+    - wiki.zoo
   intent: "Find information on the wiki homepage"
   start_url: "https://wiki.zoo"
   compatible_universes:

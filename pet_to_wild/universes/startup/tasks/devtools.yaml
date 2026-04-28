@@ -16,6 +16,7 @@ tasks:
       autonomy_levels:
         L0: "1. Look for the login form 2. Enter your credentials 3. Click the login button 4. Verify you see the dashboard"
         L1: "Login to the Kanban board with your credentials"
+        L2: "You use the team Kanban board to track work."
 
   eval:
     types:
@@ -39,6 +40,7 @@ tasks:
       autonomy_levels:
         L0: "1. Look for the Sign In link or form 2. Enter your credentials 3. Click Sign In 4. Verify you see the dashboard"
         L1: "Login to Gitea with your credentials"
+        L2: "You use Gitea to manage your code repositories."
 
   eval:
     types:

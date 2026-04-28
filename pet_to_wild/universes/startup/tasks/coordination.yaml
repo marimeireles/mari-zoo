@@ -6,7 +6,7 @@ tasks:
 
 - id: 301
   sites:
-    - mail
+    - snappymail.zoo
   intent: "Alice and Bob negotiate a meeting time via email"
   start_url: "https://snappymail.zoo"
   compatible_universes:
@@ -94,7 +94,7 @@ tasks:
 
 - id: 302
   sites:
-    - mail
+    - snappymail.zoo
   intent: "Three agents coordinate to find a common meeting time"
   start_url: "https://snappymail.zoo"
   compatible_universes:
@@ -122,6 +122,16 @@ tasks:
         - Thursday: Free 1pm-5pm
         - Friday: Busy
       autonomy_levels:
+        L0: |
+          1. Login to snappymail
+          2. Compose an email to bob@snappymail.zoo AND charlie@snappymail.zoo proposing 2-3 meeting times from your calendar
+          3. Send the email
+          4. End with [SIGNAL: waiting:email_from:bob@snappymail.zoo]
+
+          When you run again after replies arrive:
+          1. Read replies from Bob and Charlie
+          2. Find a time that works for all three calendars and reply-all confirming it
+          3. End with [SIGNAL: complete] stating the agreed meeting time
         L1: |
           Email Bob (bob@snappymail.zoo) AND Charlie (charlie@snappymail.zoo) to schedule a meeting.
           Propose 2-3 times that work for your calendar.
@@ -129,6 +139,7 @@ tasks:
 
           In later turns, check replies and negotiate until all three agree.
           When agreement is reached, end with [SIGNAL: complete] stating the final time.
+        L2: "Schedule a meeting with Bob and Charlie via email. Confirm a time that works for all three of you."
 
     bob:
       require_login: true
@@ -142,6 +153,13 @@ tasks:
         - Thursday: Busy all day
         - Friday: Free 9am-1pm
       autonomy_levels:
+        L0: |
+          1. Login to snappymail
+          2. Check inbox for a meeting-scheduling email from Alice or Charlie
+          3. If no relevant email yet, end with [SIGNAL: waiting:email_from:alice@snappymail.zoo]
+          4. Compare the proposed times against your calendar
+          5. Reply-all so everyone sees, agreeing only to times that work for you
+          6. When all three agree on a time, end with [SIGNAL: complete] stating it
         L1: |
           Check email for messages from Alice or Charlie about scheduling a meeting.
           If no relevant email yet, end with [SIGNAL: waiting:email_from:alice@snappymail.zoo]
@@ -149,6 +167,7 @@ tasks:
           When you see a proposal, reply with times that work for your calendar.
           Only agree to times you're actually free. Reply-all so everyone sees.
           When all three agree, end with [SIGNAL: complete] stating the final time.
+        L2: "Respond to a meeting-scheduling email. Agree to a time that works for your calendar."
 
     charlie:
       require_login: true
@@ -162,6 +181,13 @@ tasks:
         - Thursday: Busy
         - Friday: Free all day
       autonomy_levels:
+        L0: |
+          1. Login to snappymail
+          2. Check inbox for a meeting-scheduling email from Alice or Bob
+          3. If no relevant email yet, end with [SIGNAL: waiting:email_from:alice@snappymail.zoo]
+          4. Compare the proposed times against your calendar
+          5. Reply-all so everyone sees, agreeing only to times that work for you
+          6. When all three agree on a time, end with [SIGNAL: complete] stating it
         L1: |
           Check email for messages from Alice or Bob about scheduling a meeting.
           If no relevant email yet, end with [SIGNAL: waiting:email_from:alice@snappymail.zoo]
@@ -169,6 +195,7 @@ tasks:
           When you see a proposal, reply with times that work for your calendar.
           Only agree to times you're actually free. Reply-all so everyone sees.
           When all three agree, end with [SIGNAL: complete] stating the final time.
+        L2: "Respond to a meeting-scheduling email. Agree to a time that works for your calendar."
 
   eval:
     types:
@@ -184,7 +211,7 @@ tasks:
 
 - id: 303
   sites:
-    - mail
+    - snappymail.zoo
   intent: "Agents with partial information must share to solve a problem"
   start_url: "https://snappymail.zoo"
   compatible_universes:
@@ -211,6 +238,15 @@ tasks:
         You DON'T KNOW what the correct behavior should be.
         Bob is the product owner and knows the specification.
       autonomy_levels:
+        L0: |
+          1. Login to snappymail
+          2. Compose an email to bob@snappymail.zoo asking what multiply(3, 4) is expected to return
+          3. Send and end with [SIGNAL: waiting:email_from:bob@snappymail.zoo]
+
+          When Bob replies:
+          1. Read his specification
+          2. Compare the reported behavior (returns 7) to the spec
+          3. End with [SIGNAL: complete] reporting the bug clearly: what it returned and what it should have returned
         L1: |
           Email Bob (bob@snappymail.zoo) to ask about the expected behavior of multiply(3, 4).
           After sending, end with [SIGNAL: waiting:email_from:bob@snappymail.zoo]
@@ -220,6 +256,7 @@ tasks:
           - What should it return? (from Bob's answer)
 
           End with [SIGNAL: complete] and report the bug clearly.
+        L2: "You are a developer triaging a bug report. Coordinate with the product owner to identify the bug."
 
     bob:
       require_login: true
@@ -233,6 +270,12 @@ tasks:
         You DON'T KNOW what bug was reported.
         Alice is the developer handling a bug report.
       autonomy_levels:
+        L0: |
+          1. Login to snappymail
+          2. Check inbox for a message from Alice about the multiply function
+          3. If no email yet, end with [SIGNAL: waiting:email_from:alice@snappymail.zoo]
+          4. Reply to Alice with the spec: multiply(a, b) should return a * b, so multiply(3, 4) should return 12
+          5. End with [SIGNAL: complete] after sending your reply
         L1: |
           Check email for a message from Alice (alice@snappymail.zoo) about the multiply function.
           If no email yet, end with [SIGNAL: waiting:email_from:alice@snappymail.zoo]
@@ -241,6 +284,7 @@ tasks:
           multiply(a, b) should return a * b, so multiply(3, 4) should return 12.
 
           End with [SIGNAL: complete] after sending your reply.
+        L2: "You are the product owner. Answer questions from developers about the spec for the multiply function."
 
   eval:
     types:

@@ -161,19 +161,21 @@ tasks:
       autonomy_levels:
         L0: |
           1. Go to snappymail.zoo
-          2. Read through your inbox
+          2. Read through your inbox. Note: the original sender of each
+             message is encoded in the subject prefix as `[<sender>] ...`
+             (the From header is the local mail relay)
           3. Identify emails that need a response
-          4. Reply to Maria suggesting a coffee time on Thursday after 2pm
-          5. Reply to David confirming the Friday 10am meeting
+          4. Reply to Maria's coffee invitation suggesting Thursday after 2pm
+          5. Reply to David's meeting reschedule confirming Friday 10am
           6. Report what emails you responded to
-        L1: "Check your inbox, find the important emails, and reply to them appropriately."
+        L1: "Check your inbox, find the important emails, and reply to them appropriately. The original sender is encoded in the subject prefix as `[<sender>] ...`."
         L2: "You are a personal assistant managing email."
   eval:
     types: [llm_judge]
     llm_judge_criteria:
-      - "The agent identified Maria's coffee invitation and David's meeting reschedule as the important emails"
-      - "The agent drafted a reply to Maria with a proposed time on Thursday after 2pm"
-      - "The agent drafted a reply to David confirming the Friday 10am meeting"
+      - "The agent identified the coffee invitation (subject prefix [maria@friends.zoo]) and the meeting reschedule (subject prefix [david@work.zoo]) as the important emails"
+      - "The agent drafted a reply to the coffee invitation with a proposed time on Thursday after 2pm"
+      - "The agent drafted a reply to the meeting reschedule confirming Friday 10am"
       - "The agent did not waste time responding to spam or newsletters"
 
 # -----------------------------------------------------------------------------

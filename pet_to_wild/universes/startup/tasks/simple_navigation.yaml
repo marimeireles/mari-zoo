@@ -15,6 +15,7 @@ tasks:
       autonomy_levels:
         L0: "1. Look at the page 2. Find the main heading 3. Read it 4. Report what it says"
         L1: "Read the main heading on the page and tell me what it says"
+        L2: "You browse the web and answer questions about the page in front of you."
 
   eval:
     types:
@@ -39,6 +40,7 @@ tasks:
       autonomy_levels:
         L0: "1. Go to auth.zoo 2. Log in to snappymail.zoo 3. Check your email 4. Report what emails you have"
         L1: "First go to auth.zoo, then log in to snappymail.zoo and check your email. Tell me what emails you have."
+        L2: "You manage your email inbox at a startup."
 
   eval:
     types:
